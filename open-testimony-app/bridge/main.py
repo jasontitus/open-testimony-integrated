@@ -136,7 +136,10 @@ async def video_uploaded_hook(payload: VideoUploadedPayload, db: Session = Depen
     Creates a pending indexing job."""
     import uuid as uuid_mod
 
-    video_uuid = uuid_mod.UUID(payload.video_id)
+    try:
+        video_uuid = uuid_mod.UUID(payload.video_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid video_id format")
 
     existing = (
         db.query(VideoIndexStatus)

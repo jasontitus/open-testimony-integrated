@@ -13,6 +13,14 @@ from models import FrameEmbedding, TranscriptEmbedding
 from tests.conftest import insert_video_stub
 
 
+def _make_open_clip_mock():
+    """Create a configured open_clip mock with a tokenizer that returns a real tensor."""
+    mock_oc = MagicMock()
+    mock_tokenizer = MagicMock(return_value=torch.zeros(1, 77, dtype=torch.long))
+    mock_oc.get_tokenizer.return_value = mock_tokenizer
+    return mock_oc
+
+
 class TestVisualTextSearch:
     """GET /search/visual?q=... text-to-video search."""
 
@@ -33,10 +41,7 @@ class TestVisualTextSearch:
             )
         db_session.commit()
 
-        with patch("search.router.open_clip") as mock_clip:
-            mock_tokenizer = MagicMock(return_value=torch.zeros(1, 77, dtype=torch.long))
-            mock_clip.get_tokenizer.return_value = mock_tokenizer
-
+        with patch.dict(sys.modules, {"open_clip": _make_open_clip_mock()}):
             resp = client.get(
                 "/search/visual",
                 params={"q": "a person walking", "limit": 3},
@@ -62,10 +67,7 @@ class TestVisualTextSearch:
 
     def test_search_no_results(self, client, auth_cookie):
         """Search with no indexed videos returns empty results."""
-        with patch("search.router.open_clip") as mock_clip:
-            mock_tokenizer = MagicMock(return_value=torch.zeros(1, 77, dtype=torch.long))
-            mock_clip.get_tokenizer.return_value = mock_tokenizer
-
+        with patch.dict(sys.modules, {"open_clip": _make_open_clip_mock()}):
             resp = client.get(
                 "/search/visual",
                 params={"q": "something"},
@@ -98,7 +100,7 @@ class TestVisualImageSearch:
             )
         db_session.commit()
 
-        # Create a minimal valid JPEG (smallest possible)
+        # Create a minimal valid JPEG
         import io
         from PIL import Image
 
@@ -132,11 +134,11 @@ class TestTranscriptSemanticSearch:
             ("The protest started at noon", 3000, 6000),
             ("Witness described the incident", 6000, 9000),
         ]
-        for text, start, end in segments:
+        for seg_text, start, end in segments:
             db_session.add(
                 TranscriptEmbedding(
                     video_id=video_uuid,
-                    segment_text=text,
+                    segment_text=seg_text,
                     start_ms=start,
                     end_ms=end,
                     embedding=np.random.randn(4096).tolist(),
@@ -212,7 +214,7 @@ class TestTranscriptExactSearch:
         vid = insert_video_stub(db_session)
         db_session.add(
             TranscriptEmbedding(
-                video_id=video_uuid(vid),
+                video_id=uuid.UUID(vid),
                 segment_text="LOUD SHOUTING was heard",
                 start_ms=0,
                 end_ms=1000,
@@ -252,8 +254,3 @@ class TestTranscriptExactSearch:
 
         assert resp.status_code == 200
         assert resp.json()["results"] == []
-
-
-def video_uuid(vid_str):
-    """Helper to convert string to UUID."""
-    return uuid.UUID(vid_str)

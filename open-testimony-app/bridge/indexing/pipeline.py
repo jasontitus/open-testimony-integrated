@@ -62,8 +62,6 @@ def encode_frames_batch(frames, vision_model, preprocess, device):
 
     Returns a numpy array of shape (N, embedding_dim).
     """
-    import open_clip
-
     tensors = torch.stack([preprocess(img) for img in frames]).to(device)
 
     with torch.no_grad():

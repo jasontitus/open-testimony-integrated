@@ -5,6 +5,11 @@ import uuid
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
+# Pre-mock heavy ML dependencies that may have broken transitive imports
+# (e.g. open_clip -> transformers -> sklearn -> scipy TypeError on some envs).
+# Must happen before any bridge module is imported.
+sys.modules.setdefault("open_clip", MagicMock())
+
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -26,11 +31,40 @@ TEST_DATABASE_URL = os.environ.get(
 
 @pytest.fixture(scope="session")
 def db_engine():
-    """Create a test database engine and tables."""
+    """Create a test database engine and tables.
+
+    The bridge tables have FK references to the OT API's `videos` table,
+    so we create it here if it doesn't already exist.
+    """
     engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
-    # Create pgvector extension (may already exist)
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        # Create the OT API's videos table (bridge FK target) if missing
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS videos (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                device_id VARCHAR(255) NOT NULL,
+                object_name VARCHAR(500) NOT NULL,
+                file_hash VARCHAR(64) NOT NULL,
+                timestamp TIMESTAMP NOT NULL,
+                latitude DOUBLE PRECISION NOT NULL,
+                longitude DOUBLE PRECISION NOT NULL,
+                incident_tags TEXT[],
+                source VARCHAR(50),
+                media_type VARCHAR(20) DEFAULT 'video',
+                exif_metadata JSONB,
+                verification_status VARCHAR(20) NOT NULL,
+                metadata_json JSONB NOT NULL DEFAULT '{}',
+                category VARCHAR(50),
+                location_description VARCHAR(500),
+                notes TEXT,
+                annotations_updated_at TIMESTAMP,
+                annotations_updated_by VARCHAR(255),
+                uploaded_at TIMESTAMP NOT NULL,
+                deleted_at TIMESTAMP,
+                deleted_by UUID
+            )
+        """))
         conn.commit()
     Base.metadata.create_all(bind=engine)
     yield engine
@@ -51,6 +85,7 @@ def clean_tables(db_engine):
         conn.execute(text("DELETE FROM frame_embeddings"))
         conn.execute(text("DELETE FROM transcript_embeddings"))
         conn.execute(text("DELETE FROM video_index_status"))
+        conn.execute(text("DELETE FROM videos"))
         conn.commit()
 
 

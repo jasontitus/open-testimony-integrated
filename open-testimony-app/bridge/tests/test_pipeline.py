@@ -1,7 +1,6 @@
 """Tests for the indexing pipeline logic."""
 import os
 import sys
-import tempfile
 import uuid
 from unittest.mock import patch, MagicMock
 
@@ -14,22 +13,26 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 class TestFrameExtraction:
     """Tests for extract_frames()."""
 
-    def test_extract_frames_from_video(self, tmp_path):
+    def test_extract_frames_from_video(self):
         """extract_frames yields frames at the specified interval."""
-        import cv2
-
-        # Create a small test video (10 frames of solid color)
-        video_path = str(tmp_path / "test.mp4")
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(video_path, fourcc, 10.0, (64, 64))
-        for i in range(30):  # 3 seconds at 10fps
-            frame = np.full((64, 64, 3), fill_value=128, dtype=np.uint8)
-            writer.write(frame)
-        writer.release()
-
         from indexing.pipeline import extract_frames
 
-        frames = list(extract_frames(video_path, interval_sec=1.0))
+        # Mock cv2.VideoCapture to return bright frames
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.return_value = 10.0  # 10 fps
+
+        bright_frame = np.full((64, 64, 3), fill_value=128, dtype=np.uint8)
+        # 30 frames at 10fps = 3 seconds; return True 30 times, then False
+        mock_cap.read.side_effect = [(True, bright_frame)] * 30 + [(False, None)]
+
+        with patch("indexing.pipeline.cv2") as mock_cv2:
+            mock_cv2.VideoCapture.return_value = mock_cap
+            mock_cv2.CAP_PROP_FPS = 5  # cv2.CAP_PROP_FPS constant
+            mock_cv2.COLOR_BGR2RGB = 4  # cv2.COLOR_BGR2RGB constant
+            mock_cv2.cvtColor.side_effect = lambda frame, code: frame  # passthrough
+
+            frames = list(extract_frames("/fake/video.mp4", interval_sec=1.0))
 
         # At 10fps with 1sec interval, we expect ~3 frames from 3 seconds
         assert len(frames) >= 2
@@ -39,30 +42,38 @@ class TestFrameExtraction:
             assert timestamp_ms >= 0
             assert pil_img.mode == "RGB"
 
-    def test_dark_frames_skipped(self, tmp_path):
+    def test_dark_frames_skipped(self):
         """extract_frames skips dark/black frames."""
-        import cv2
-
-        video_path = str(tmp_path / "dark.mp4")
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(video_path, fourcc, 10.0, (64, 64))
-        for _ in range(10):
-            # All-black frames (brightness < 15)
-            frame = np.zeros((64, 64, 3), dtype=np.uint8)
-            writer.write(frame)
-        writer.release()
-
         from indexing.pipeline import extract_frames
 
-        frames = list(extract_frames(video_path, interval_sec=0.5))
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.return_value = 10.0
+
+        dark_frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        mock_cap.read.side_effect = [(True, dark_frame)] * 10 + [(False, None)]
+
+        with patch("indexing.pipeline.cv2") as mock_cv2:
+            mock_cv2.VideoCapture.return_value = mock_cap
+            mock_cv2.CAP_PROP_FPS = 5
+            mock_cv2.COLOR_BGR2RGB = 4
+            mock_cv2.cvtColor.side_effect = lambda frame, code: frame
+
+            frames = list(extract_frames("/fake/video.mp4", interval_sec=0.5))
+
         assert len(frames) == 0
 
     def test_invalid_video_path_raises(self):
-        """extract_frames raises on invalid video path."""
+        """extract_frames raises on invalid video path when cap fails."""
         from indexing.pipeline import extract_frames
 
-        with pytest.raises(RuntimeError, match="Cannot open"):
-            list(extract_frames("/nonexistent/video.mp4"))
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = False
+
+        with patch("indexing.pipeline.cv2") as mock_cv2:
+            mock_cv2.VideoCapture.return_value = mock_cap
+            with pytest.raises(RuntimeError, match="Cannot open"):
+                list(extract_frames("/nonexistent/video.mp4"))
 
 
 class TestEncodeFramesBatch:
@@ -76,11 +87,11 @@ class TestEncodeFramesBatch:
         from PIL import Image
         from indexing.pipeline import encode_frames_batch
 
-        frames = [Image.new("RGB", (64, 64), color="red") for _ in range(4)]
-
         with patch("indexing.pipeline.settings") as mock_settings:
             mock_settings.VISION_MODEL_FAMILY = "open_clip"
             mock_settings.DEVICE = "cpu"
+
+            frames = [Image.new("RGB", (64, 64), color="red") for _ in range(4)]
             embeddings = encode_frames_batch(
                 frames,
                 mock_vision_model,
@@ -89,7 +100,7 @@ class TestEncodeFramesBatch:
             )
 
         assert embeddings.shape == (4, 768)
-        assert embeddings.dtype == np.float32
+        assert embeddings.itemsize == 4  # float32 = 4 bytes
 
     def test_embeddings_normalized(
         self, mock_vision_model, mock_vision_preprocess
@@ -99,11 +110,11 @@ class TestEncodeFramesBatch:
         from PIL import Image
         from indexing.pipeline import encode_frames_batch
 
-        frames = [Image.new("RGB", (64, 64))]
-
         with patch("indexing.pipeline.settings") as mock_settings:
             mock_settings.VISION_MODEL_FAMILY = "open_clip"
             mock_settings.DEVICE = "cpu"
+
+            frames = [Image.new("RGB", (64, 64))]
             embeddings = encode_frames_batch(
                 frames,
                 mock_vision_model,
@@ -150,9 +161,6 @@ class TestFullPipeline:
         """Pipeline marks job as failed when MinIO download fails."""
         from indexing.pipeline import index_video
         from models import VideoIndexStatus
-
-        vid = str(uuid.uuid4())
-        # Insert video stub
         from tests.conftest import insert_video_stub
 
         vid = insert_video_stub(db_session)

@@ -70,9 +70,9 @@ class TestVideoUploadedWebhook:
         assert resp.status_code == 422
 
     def test_webhook_invalid_uuid(self, client):
-        """Webhook with invalid UUID returns error."""
+        """Webhook with invalid UUID returns 422."""
         resp = client.post(
             "/hooks/video-uploaded",
             json={"video_id": "not-a-uuid", "object_name": "test.mp4"},
         )
-        assert resp.status_code != 200
+        assert resp.status_code == 422
