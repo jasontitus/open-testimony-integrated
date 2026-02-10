@@ -1,0 +1,70 @@
+name: open_testimony
+description: Open Testimony - Secure Video Integrity System - Mobile App
+publish_to: 'none'
+version: 2.1.0+5
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI
+  cupertino_icons: ^1.0.6
+
+  # Camera
+  camera: ^0.10.5
+
+  # Cryptography & Security
+  flutter_secure_storage: ^9.0.0
+  pointycastle: ^3.7.3
+  cryptography: ^2.5.0
+  crypto: ^3.0.3
+
+  # Location
+  geolocator: ^11.0.0
+  permission_handler: ^11.2.0
+
+  # Networking
+  dio: ^5.4.0
+  http: ^1.2.0
+
+  # State Management
+  provider: ^6.1.1
+
+  # Storage
+  path_provider: ^2.1.2
+  path: ^1.9.0
+  sqflite: ^2.3.2
+
+  # Utilities
+  uuid: ^4.3.3
+  intl: ^0.19.0
+
+  # Media import (Feature 1)
+  image_picker: ^1.0.7
+  exif: ^3.3.0
+
+  # Crash reporting (no analytics)
+  firebase_core: ^3.13.0
+  firebase_crashlytics: ^4.3.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/app_icon.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/app_icon.png"
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/

@@ -1,0 +1,51 @@
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.log
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+test_venv/
+
+# Claude Code
+.claude/
+
+# Docker volumes
+minio_data/
+postgres_data/
+
+# Pytest cache
+.pytest_cache/
+
+# Node
+node_modules/
+
+# VideoIndexer output
+video_index_output/
+video_thumbnails_output/
+temp_uploads/
+*.faiss
+*.m3u
+
+# SSL certificates
+nginx/certs/*.pem
+nginx/certs/*.key
+
+# Google Play
+**/play-store-key.json

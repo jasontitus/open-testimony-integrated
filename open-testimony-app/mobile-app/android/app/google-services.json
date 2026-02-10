@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "416996271373",
+    "project_id": "open-testimony",
+    "storage_bucket": "open-testimony.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:416996271373:android:cbb0441417c1a59eacbc44",
+        "android_client_info": {
+          "package_name": "com.opentestimony.open_testimony"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBmXwUpeMFKmBiMp8_Bz8M60dq54ZtpcAc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

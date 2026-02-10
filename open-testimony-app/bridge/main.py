@@ -1,0 +1,295 @@
+"""AI Search Bridge Service — connects Open Testimony with VideoIndexer AI models."""
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
+
+from config import settings
+from models import VideoIndexStatus
+from auth import require_auth
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Database
+engine = create_engine(settings.DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
+
+# Global model holders (loaded at startup)
+vision_model = None
+vision_preprocess = None
+text_model = None
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def load_vision_model():
+    """Load the vision model (OpenCLIP or PE-Core) into memory."""
+    global vision_model, vision_preprocess
+    import torch
+
+    device = torch.device(settings.DEVICE)
+    logger.info(
+        f"Loading vision model: {settings.VISION_MODEL_FAMILY} / "
+        f"{settings.VISION_MODEL_NAME} on {device}"
+    )
+
+    if settings.VISION_MODEL_FAMILY == "open_clip":
+        import open_clip
+
+        model, _, preprocess = open_clip.create_model_and_transforms(
+            settings.VISION_MODEL_NAME,
+            pretrained=settings.VISION_MODEL_PRETRAINED,
+            device=device,
+        )
+        model.eval()
+        vision_model = model
+        vision_preprocess = preprocess
+    else:
+        # PE-Core model via VideoIndexer's code (mounted at /opt/video-indexer/src)
+        from core.vision_encoder.pe_no_einops_final_verified import CLIP
+        from core.vision_encoder.transforms import get_image_transform
+
+        model = CLIP.from_config(settings.VISION_MODEL_NAME, pretrained=True)
+        model = model.to(device)
+        if settings.USE_FP16:
+            model = model.half()
+        model.eval()
+        vision_model = model
+        vision_preprocess = get_image_transform(model.image_size)
+
+    logger.info("Vision model loaded successfully")
+
+
+def load_text_model():
+    """Load the transcript embedding model (Qwen3-Embedding-8B)."""
+    global text_model
+    from sentence_transformers import SentenceTransformer
+
+    logger.info(f"Loading text model: {settings.TRANSCRIPT_MODEL_NAME}")
+    text_model = SentenceTransformer(
+        settings.TRANSCRIPT_MODEL_NAME, device=settings.DEVICE
+    )
+    logger.info("Text model loaded successfully")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load AI models on startup, start background indexing worker."""
+    load_vision_model()
+    load_text_model()
+
+    # Start the background indexing worker
+    from indexing.worker import indexing_worker
+
+    worker_task = asyncio.create_task(indexing_worker())
+    logger.info("Background indexing worker started")
+
+    yield
+
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("Bridge service shutting down")
+
+
+app = FastAPI(
+    title="AI Search Bridge",
+    description="Connects Open Testimony with VideoIndexer AI-powered search",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# --- Webhook: enqueue video for indexing ---
+
+
+class VideoUploadedPayload(BaseModel):
+    video_id: str
+    object_name: str
+
+
+@app.post("/hooks/video-uploaded")
+async def video_uploaded_hook(payload: VideoUploadedPayload, db: Session = Depends(get_db)):
+    """Webhook called by OT API after a successful video upload.
+    Creates a pending indexing job."""
+    import uuid as uuid_mod
+
+    video_uuid = uuid_mod.UUID(payload.video_id)
+
+    existing = (
+        db.query(VideoIndexStatus)
+        .filter(VideoIndexStatus.video_id == video_uuid)
+        .first()
+    )
+    if existing:
+        return {"status": "already_queued", "video_id": payload.video_id}
+
+    job = VideoIndexStatus(
+        video_id=video_uuid,
+        object_name=payload.object_name,
+        status="pending",
+    )
+    db.add(job)
+    db.commit()
+
+    logger.info(f"Queued indexing for video {payload.video_id}")
+    return {"status": "queued", "video_id": payload.video_id}
+
+
+# --- Indexing status endpoints ---
+
+
+@app.get("/indexing/status")
+async def indexing_overview(
+    _user: dict = Depends(require_auth), db: Session = Depends(get_db)
+):
+    """Overall indexing statistics."""
+    from sqlalchemy import func
+
+    rows = (
+        db.query(VideoIndexStatus.status, func.count())
+        .group_by(VideoIndexStatus.status)
+        .all()
+    )
+    counts = {status: count for status, count in rows}
+    return {
+        "total": sum(counts.values()),
+        "pending": counts.get("pending", 0),
+        "processing": counts.get("processing", 0),
+        "completed": counts.get("completed", 0),
+        "failed": counts.get("failed", 0),
+    }
+
+
+@app.get("/indexing/status/{video_id}")
+async def indexing_status_for_video(
+    video_id: str,
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Indexing status for a specific video."""
+    import uuid as uuid_mod
+
+    job = (
+        db.query(VideoIndexStatus)
+        .filter(VideoIndexStatus.video_id == uuid_mod.UUID(video_id))
+        .first()
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="No indexing job found")
+    return {
+        "video_id": str(job.video_id),
+        "status": job.status,
+        "visual_indexed": job.visual_indexed,
+        "transcript_indexed": job.transcript_indexed,
+        "frame_count": job.frame_count,
+        "segment_count": job.segment_count,
+        "error_message": job.error_message,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    }
+
+
+@app.post("/indexing/reindex/{video_id}")
+async def reindex_video(
+    video_id: str,
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Manually trigger re-indexing for a video (admin)."""
+    import uuid as uuid_mod
+    from models import FrameEmbedding, TranscriptEmbedding
+
+    video_uuid = uuid_mod.UUID(video_id)
+
+    job = (
+        db.query(VideoIndexStatus)
+        .filter(VideoIndexStatus.video_id == video_uuid)
+        .first()
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="No indexing job found")
+
+    # Delete existing embeddings
+    db.query(FrameEmbedding).filter(FrameEmbedding.video_id == video_uuid).delete()
+    db.query(TranscriptEmbedding).filter(
+        TranscriptEmbedding.video_id == video_uuid
+    ).delete()
+
+    # Reset job to pending
+    job.status = "pending"
+    job.visual_indexed = False
+    job.transcript_indexed = False
+    job.frame_count = None
+    job.segment_count = None
+    job.error_message = None
+    job.completed_at = None
+    db.commit()
+
+    return {"status": "reindex_queued", "video_id": video_id}
+
+
+@app.post("/indexing/reindex-all")
+async def reindex_all(
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Re-index all videos (admin)."""
+    from models import FrameEmbedding, TranscriptEmbedding
+
+    db.query(FrameEmbedding).delete()
+    db.query(TranscriptEmbedding).delete()
+
+    jobs = db.query(VideoIndexStatus).all()
+    for job in jobs:
+        job.status = "pending"
+        job.visual_indexed = False
+        job.transcript_indexed = False
+        job.frame_count = None
+        job.segment_count = None
+        job.error_message = None
+        job.completed_at = None
+    db.commit()
+
+    return {"status": "reindex_all_queued", "count": len(jobs)}
+
+
+# --- Search endpoints (from search router) ---
+
+from search.router import router as search_router
+
+app.include_router(search_router)
+
+
+# --- Health check ---
+
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "healthy",
+        "vision_model_loaded": vision_model is not None,
+        "text_model_loaded": text_model is not None,
+    }

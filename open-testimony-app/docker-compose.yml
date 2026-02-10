@@ -1,0 +1,121 @@
+services:
+  # 1. Reverse Proxy (TLS Termination)
+  # Host port 18080. Use: ngrok http 18080 --domain=opentestimony.ngrok.app
+  nginx:
+    image: nginx:latest
+    ports:
+      - "18080:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf:/etc/nginx/conf.d
+      - ./nginx/certs:/etc/letsencrypt
+      - ./nginx/html:/var/www/html
+    depends_on:
+      - api
+      - bridge
+    restart: always
+
+  # 2. API Server (FastAPI / Go)
+  api:
+    build: ./api-server
+    volumes:
+      - ./api-server:/app
+    environment:
+      - DATABASE_URL=postgresql://user:pass@db:5432/opentestimony
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=admin
+      - MINIO_SECRET_KEY=supersecret
+      # ngrok domain for external access (video playback URLs)
+      - MINIO_EXTERNAL_ENDPOINT=${MINIO_EXTERNAL_ENDPOINT:-opentestimony.ngrok.app/video-stream}
+      - MINIO_EXTERNAL_SCHEME=${MINIO_EXTERNAL_SCHEME:-https}
+      - MINIO_BUCKET=opentestimony-videos
+      # Auth
+      - JWT_SECRET_KEY=change-me-in-production-use-a-real-secret
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin
+      - ADMIN_DISPLAY_NAME=Administrator
+      # Bridge service URL for AI indexing webhook
+      - BRIDGE_URL=http://bridge:8003
+    depends_on:
+      - db
+      - minio
+    restart: always
+
+  # 3. Object Storage (MinIO)
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=supersecret
+    volumes:
+      - minio_data:/data
+    restart: always
+
+  # 4. Metadata Database (PostgreSQL with pgvector)
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=pass
+      - POSTGRES_DB=opentestimony
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  # 5. Web UI (React)
+  web-ui:
+    build: ./web-ui
+    restart: always
+    depends_on:
+      - api
+
+  # 6. AI Search Bridge Service
+  bridge:
+    build: ./bridge
+    volumes:
+      - ./bridge:/app
+      # Mount VideoIndexer source read-only for model code reuse
+      - ../VideoIndexer-project/src:/opt/video-indexer/src:ro
+      - bridge_temp:/data/temp
+    environment:
+      - DATABASE_URL=postgresql://user:pass@db:5432/opentestimony
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=admin
+      - MINIO_SECRET_KEY=supersecret
+      - MINIO_BUCKET=opentestimony-videos
+      - JWT_SECRET_KEY=change-me-in-production-use-a-real-secret
+      # Model configuration
+      - VISION_MODEL_FAMILY=open_clip
+      - VISION_MODEL_NAME=ViT-L-14
+      - VISION_MODEL_PRETRAINED=datacomp_xl_s13b_b90k
+      - VISION_EMBEDDING_DIM=768
+      - TRANSCRIPT_MODEL_NAME=Qwen/Qwen3-Embedding-8B
+      - TRANSCRIPT_EMBEDDING_DIM=4096
+      - WHISPER_MODEL=base
+      - DEVICE=cpu
+      - USE_FP16=false
+      - FRAME_INTERVAL_SEC=2.0
+      - BATCH_SIZE=16
+      - WORKER_POLL_INTERVAL=10
+      - OT_API_URL=http://api:8000
+    depends_on:
+      - db
+      - minio
+    restart: always
+    # Uncomment for GPU support:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  minio_data:
+  postgres_data:
+  bridge_temp:

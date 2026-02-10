@@ -1,0 +1,67 @@
+services:
+  # 1. Reverse Proxy (TLS Termination)
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf:/etc/nginx/conf.d
+      - ./nginx/certs:/etc/letsencrypt
+      - ./nginx/html:/var/www/html
+    depends_on:
+      - api
+    restart: always
+
+  # 2. API Server (FastAPI / Go)
+  api:
+    build: ./api-server
+    volumes:
+      - ./api-server:/app
+    environment:
+      - DATABASE_URL=postgresql://user:pass@db:5432/opentestimony
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=admin
+      - MINIO_SECRET_KEY=supersecret
+      - MINIO_EXTERNAL_ENDPOINT=localhost/video-stream
+      - MINIO_BUCKET=opentestimony-videos
+    depends_on:
+      - db
+      - minio
+    restart: always
+
+  # 3. Object Storage (MinIO)
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=supersecret
+    volumes:
+      - minio_data:/data
+    restart: always
+
+  # 4. Metadata Database (PostgreSQL)
+  db:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=pass
+      - POSTGRES_DB=opentestimony
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  # 5. Web UI (React)
+  web-ui:
+    build: ./web-ui
+    restart: always
+    depends_on:
+      - api
+
+volumes:
+  minio_data:
+  postgres_data:

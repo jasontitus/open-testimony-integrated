@@ -1,0 +1,26 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.log
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker volumes
+minio_data/
+postgres_data/
+
+# SSL certificates (use Let's Encrypt in production)
+nginx/certs/*.pem
+nginx/certs/*.key

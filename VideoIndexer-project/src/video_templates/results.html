@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Open Testimony - Search Results</title>
+    <style>
+        :root {
+            --bg-primary: #f0f2f5;
+            --bg-secondary: #fff;
+            --text-primary: #1c1e21;
+            --text-secondary: #65676b;
+            --accent: #007bff;
+            --accent-hover: #0056b3;
+            --border-color: #dddfe2;
+            --header-shadow: rgba(0,0,0,0.1);
+            --card-shadow: rgba(0,0,0,0.1);
+        }
+        
+        [data-theme="dark"] {
+            --bg-primary: #18191a;
+            --bg-secondary: #242526;
+            --text-primary: #e4e6eb;
+            --text-secondary: #b0b3b8;
+            --accent: #1877f2;
+            --accent-hover: #166fe5;
+            --border-color: #3a3b3c;
+            --header-shadow: rgba(0,0,0,0.4);
+            --card-shadow: rgba(0,0,0,0.3);
+        }
+        
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 0; 
+            background-color: var(--bg-primary); 
+            color: var(--text-primary);
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+        .header { 
+            background-color: var(--bg-secondary); 
+            padding: 15px 30px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: space-between;
+            box-shadow: 0 2px 4px var(--header-shadow); 
+            margin-bottom: 20px;
+            transition: background-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+        }
+        .header-brand-link {
+            display: flex;
+            align-items: center;
+            text-decoration: none;
+            color: inherit;
+        }
+        .header-brand-link:hover .title { text-decoration: underline; }
+        .logo { height: 40px; margin-right: 15px; }
+        .title { font-size: 20px; font-weight: bold; color: var(--accent); margin: 0; transition: color 0.3s ease; }
+        .dark-mode-toggle {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .dark-mode-toggle:hover {
+            background: var(--border-color);
+        }
+        .dark-mode-toggle svg {
+            width: 18px;
+            height: 18px;
+            fill: currentColor;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .result-item {
+            margin-bottom: 20px;
+            display: inline-block;
+            margin-right: 15px;
+            vertical-align: top;
+            text-align: left;
+            width: 220px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px var(--card-shadow);
+            border: 1px solid var(--border-color);
+            transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .result-item img {
+            width: 100%;
+            height: 124px;
+            object-fit: cover;
+            display: block;
+        }
+        .result-content { padding: 10px; }
+        .score {
+            font-size: 12px;
+            color: var(--text-secondary);
+            display: block;
+            margin-bottom: 5px;
+            transition: color 0.3s ease;
+        }
+        .tag-container { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+        .tag { 
+            background-color: #e7f3ff; 
+            color: var(--accent); 
+            padding: 1px 6px; 
+            border-radius: 4px; 
+            font-size: 11px; 
+            font-weight: 600;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+        [data-theme="dark"] .tag {
+            background-color: #1e3a5f;
+            color: #6ba3f5;
+        }
+        hr {
+            margin-top: 20px;
+            margin-bottom: 20px;
+        }
+        .search-form-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .search-form-container input[type="text"] {
+             flex-grow: 1;
+             margin-right: auto;
+        }
+        /* Style for path display */
+        .path-container {
+            margin-top: 5px;
+            display: flex; /* Align path and button */
+            align-items: center;
+            justify-content: center; /* Center path and button */
+            gap: 5px; /* Space between path and button */
+        }
+        .path-container code {
+            font-size: 0.75em;
+            word-wrap: break-word;
+            color: var(--text-secondary);
+            background-color: var(--bg-primary);
+            padding: 2px 4px;
+            border-radius: 3px;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            display: inline-block;
+            vertical-align: middle;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+        .copy-button {
+            font-size: 0.7em;
+            padding: 1px 4px;
+            cursor: pointer;
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            color: var(--text-primary);
+            transition: all 0.3s ease;
+        }
+        .copy-button:hover {
+            background-color: var(--border-color);
+        }
+        .search-form-container input[type="text"] {
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 8px 12px;
+            border-radius: 4px;
+            transition: all 0.3s ease;
+        }
+        .search-form-container input[type="text"]:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        .search-form-container input[type="submit"] {
+            background-color: var(--accent);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .search-form-container input[type="submit"]:hover {
+            background-color: var(--accent-hover);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <a href="https://opentestimony.ngrok.app/" class="header-brand-link">
+                <img src="/assets/open-testimony.png" alt="Open Testimony Logo" class="logo">
+                <h1 class="title">Open Testimony</h1>
+            </a>
+        </div>
+        <button class="dark-mode-toggle" id="darkModeToggle" aria-label="Toggle dark mode">
+            <svg id="sunIcon" style="display: none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="5"></circle>
+                <line x1="12" y1="1" x2="12" y2="3"></line>
+                <line x1="12" y1="21" x2="12" y2="23"></line>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                <line x1="1" y1="12" x2="3" y2="12"></line>
+                <line x1="21" y1="12" x2="23" y2="12"></line>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+            <svg id="moonIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+            <span id="toggleText">Dark Mode</span>
+        </button>
+    </div>
+    <div class="container">
+        <form class="search-form" action="/search" enctype="multipart/form-data" method="post">
+        <div class="search-form-container">
+             <input name="text" type="text" placeholder="Enter text ->" style="width: 300px;">
+             <input type="submit" value="Search Videos">
+        </div>
+    </form>
+
+    <hr style="margin-top: 10px;">
+
+    <h1>Top {{ results|length }} Video Matches</h1>
+    <div>
+        {# Reverted: Unpack original 4-tuple #}
+        {% for video_path, frame_number, distance, path_hash in results %}
+            <div class="result-item">
+                {# Reverted: Always link image to player #}
+                {% set encoded_path = video_path | urlencode %}
+                <a href="/player?path={{ encoded_path }}&start_ms={{ frame_number }}" title="Open video starting near frame {{ frame_number }}ms">
+                    <img src="/thumbnails/{{ path_hash }}/{{ frame_number }}.jpg"
+                         alt="Frame {{ frame_number }} from {{ video_path }}"
+                         onerror="this.style.display='none'; this.onerror=null;" >
+                </a>
+                {# Score #}
+                <span class="score">Score: {{ "%.2f"|format(distance) }}</span>
+            </div>
+        {% endfor %}
+    </div>
+
+    {# --- Moved M3U Download Link Here (only if text search results) --- #}
+    {% if search_text %}
+    <div style="margin-top: 20px; margin-bottom: 10px; text-align: center;"> {# Adjusted margin #}
+        {# Reduced padding/font-size for smaller appearance #}
+        <a href="/playlist.m3u?text={{ search_text | urlencode }}" download="results_with_start.m3u" style="padding: 4px 8px; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 4px; font-size: 0.8em;">
+            Download Playlist (M3U)
+        </a>
+    </div>
+    {% endif %}
+    {# --- End M3U Download Link --- #}
+
+    <br>
+    <a href="/">Back to Home (Clear Results)</a>
+
+    <!-- JavaScript for Copy Button -->
+    <script>
+        // Dark mode functionality
+        (function() {
+            const theme = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', theme);
+            updateToggleIcon(theme);
+            
+            function updateToggleIcon(theme) {
+                const sunIcon = document.getElementById('sunIcon');
+                const moonIcon = document.getElementById('moonIcon');
+                const toggleText = document.getElementById('toggleText');
+                
+                if (theme === 'dark') {
+                    sunIcon.style.display = 'block';
+                    moonIcon.style.display = 'none';
+                    toggleText.textContent = 'Light Mode';
+                } else {
+                    sunIcon.style.display = 'none';
+                    moonIcon.style.display = 'block';
+                    toggleText.textContent = 'Dark Mode';
+                }
+            }
+            
+            document.getElementById('darkModeToggle').addEventListener('click', function() {
+                const currentTheme = document.documentElement.getAttribute('data-theme');
+                const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', newTheme);
+                localStorage.setItem('theme', newTheme);
+                updateToggleIcon(newTheme);
+            });
+        })();
+        
+        function copyToClipboard(textToCopy) {
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(textToCopy)
+                    .then(() => {
+                        // Optional: Provide feedback (e.g., change button text)
+                        console.log("Path copied to clipboard:" + textToCopy);
+                        // Find the button that was clicked and change its text
+                        // This is a bit simplified; might need refinement for many buttons
+                        // event.target.innerText = 'Copied!';
+                        // setTimeout(() => { event.target.innerText = 'Copy'; }, 1500); // Reset after 1.5s
+                    })
+                    .catch(err => {
+                        console.error('Failed to copy path: ', err);
+                        alert('Failed to copy path.');
+                    });
+            } else {
+                // Fallback for older browsers or insecure contexts (e.g., http)
+                alert('Copying path requires a secure context (HTTPS) or a newer browser.');
+            }
+        }
+    </script>
+
+</body>
+</html> 

@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Open Testimony - Video Player</title>
+    <style>
+        :root {
+            --bg-primary: #000;
+            --bg-header: rgba(255, 255, 255, 0.95);
+            --text-primary: #1c1e21;
+            --text-secondary: #65676b;
+            --accent: #007bff;
+            --accent-hover: #0056b3;
+            --header-shadow: rgba(0,0,0,0.2);
+        }
+        
+        [data-theme="dark"] {
+            --bg-primary: #000;
+            --bg-header: rgba(36, 37, 38, 0.95);
+            --text-primary: #e4e6eb;
+            --text-secondary: #b0b3b8;
+            --accent: #1877f2;
+            --accent-hover: #166fe5;
+            --header-shadow: rgba(0,0,0,0.5);
+        }
+        
+        body, html { 
+            margin: 0; 
+            padding: 0; 
+            height: 100%; 
+            background-color: var(--bg-primary); 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            transition: background-color 0.3s ease;
+        }
+        .player-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: var(--bg-header);
+            color: var(--text-primary);
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 1000;
+            box-shadow: 0 2px 8px var(--header-shadow);
+            backdrop-filter: blur(10px);
+            transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+        }
+        .header-brand-link {
+            display: flex;
+            align-items: center;
+            text-decoration: none;
+            margin-right: 15px;
+        }
+        .logo-small { height: 30px; margin-right: 15px; }
+        .back-button {
+            background-color: var(--accent);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background-color 0.2s;
+        }
+        .back-button:hover { background-color: var(--accent-hover); }
+        .video-info {
+            flex: 1;
+            margin-left: 15px;
+            font-size: 14px;
+        }
+        .video-info .filename { font-weight: bold; color: var(--accent); transition: color 0.3s ease; }
+        .video-info .timestamp { color: var(--text-secondary); font-size: 12px; transition: color 0.3s ease; }
+        .dark-mode-toggle {
+            background: transparent;
+            border: 1px solid var(--text-secondary);
+            color: var(--text-primary);
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: 10px;
+        }
+        .dark-mode-toggle:hover {
+            background: var(--text-secondary);
+            opacity: 0.8;
+        }
+        .dark-mode-toggle svg {
+            width: 16px;
+            height: 16px;
+            fill: currentColor;
+        }
+        .video-container { 
+            padding-top: 55px; /* Space for header */
+            height: calc(100vh - 55px);
+            position: relative;
+        }
+        video { width: 100%; height: 100%; display: block; }
+        /* Overlay when autoplay is blocked (e.g. mobile) - tap starts playback at offset */
+        .play-overlay {
+            display: none;
+            position: absolute;
+            top: 55px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.75);
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .play-overlay.visible {
+            display: flex;
+        }
+        .play-overlay-text {
+            color: #fff;
+            font-size: 18px;
+            padding: 24px;
+            text-align: center;
+            max-width: 320px;
+        }
+        .play-overlay-text strong { display: block; margin-top: 12px; font-size: 22px; }
+    </style>
+</head>
+<body>
+    <div class="player-header">
+        <div class="header-left">
+            <a href="https://opentestimony.ngrok.app/" class="header-brand-link">
+                <img src="/assets/open-testimony.png" alt="Logo" class="logo-small">
+            </a>
+            <button class="back-button" onclick="goBack()">← Back</button>
+        </div>
+        <div style="display: flex; align-items: center;">
+            <div class="video-info">
+                <div class="filename" id="videoFilename">{{ display_filename|e }}</div>
+                <div class="timestamp" id="videoTimestamp">Starting at 0:00</div>
+            </div>
+            <button class="dark-mode-toggle" id="darkModeToggle" aria-label="Toggle dark mode">
+                <svg id="sunIcon" style="display: none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="5"></circle>
+                    <line x1="12" y1="1" x2="12" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line>
+                    <line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+                <svg id="moonIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+    
+    <div class="video-container">
+        <video id="videoPlayer" controls playsinline>
+            <!-- Source will be set by JavaScript -->
+            Your browser does not support the video tag.
+        </video>
+        <div id="playOverlay" class="play-overlay" aria-label="Tap to play video">
+            <div class="play-overlay-text">
+                Tap to play from <strong id="playOverlayTime">0:00</strong>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Dark mode functionality
+        (function() {
+            const theme = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', theme);
+            updateToggleIcon(theme);
+            
+            function updateToggleIcon(theme) {
+                const sunIcon = document.getElementById('sunIcon');
+                const moonIcon = document.getElementById('moonIcon');
+                
+                if (theme === 'dark') {
+                    sunIcon.style.display = 'block';
+                    moonIcon.style.display = 'none';
+                } else {
+                    sunIcon.style.display = 'none';
+                    moonIcon.style.display = 'block';
+                }
+            }
+            
+            document.getElementById('darkModeToggle').addEventListener('click', function() {
+                const currentTheme = document.documentElement.getAttribute('data-theme');
+                const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', newTheme);
+                localStorage.setItem('theme', newTheme);
+                updateToggleIcon(newTheme);
+            });
+        })();
+        
+        // Function to go back to previous page
+        function goBack() {
+            if (window.history.length > 1) {
+                window.history.back();
+            } else {
+                window.close(); // If opened in new tab, close it
+            }
+        }
+
+        // Get parameters from URL (secure token only - no file path exposed)
+        const urlParams = new URLSearchParams(window.location.search);
+        const videoToken = urlParams.get('video_token');
+        const startMs = parseInt(urlParams.get('video_start_milliseconds') || '0', 10);
+        const displayFilename = urlParams.get('filename') || 'Video';
+        // Re-calculate start time in seconds for client-side seeking
+        const startTimeSec = startMs / 1000.0;
+
+        // Update header info
+        if (videoToken) {
+            document.getElementById('videoFilename').textContent = displayFilename;
+            
+            const minutes = Math.floor(startMs / 60000);
+            const seconds = Math.floor((startMs % 60000) / 1000);
+            const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            document.getElementById('videoTimestamp').textContent = `Starting at ${timeStr}`;
+        }
+
+        const videoElement = document.getElementById('videoPlayer');
+
+        if (videoToken) {
+            // Token in query string so path is short and nginx/proxies don't mishandle long segments
+            const videoSrcUrl = `/stream_video/${startMs}?t=${encodeURIComponent(videoToken)}`;
+
+            console.log('Setting video source (token-based)');
+            videoElement.src = videoSrcUrl;
+
+            // Seek to offset and try autoplay. On mobile, play() is often blocked; show overlay so one tap starts playback at offset.
+            const playOverlay = document.getElementById('playOverlay');
+            const playOverlayTime = document.getElementById('playOverlayTime');
+            const startM = Math.floor(startMs / 60000);
+            const startS = Math.floor((startMs % 60000) / 1000);
+            const timeLabel = `${startM}:${String(startS).padStart(2, '0')}`;
+            if (playOverlayTime) playOverlayTime.textContent = timeLabel;
+
+            function tryPlay() {
+                videoElement.play().then(() => {
+                    if (playOverlay) playOverlay.classList.remove('visible');
+                }).catch(() => {
+                    if (playOverlay) playOverlay.classList.add('visible');
+                });
+            }
+
+            function hideOverlay() {
+                if (playOverlay) playOverlay.classList.remove('visible');
+            }
+
+            if (playOverlay) {
+                playOverlay.addEventListener('click', function() {
+                    videoElement.play().catch(function() {});
+                    hideOverlay();
+                });
+            }
+            videoElement.addEventListener('playing', hideOverlay);
+
+            videoElement.addEventListener('loadedmetadata', () => {
+                if (isFinite(startTimeSec) && startTimeSec > 0 && videoElement.duration && startTimeSec < videoElement.duration) {
+                    videoElement.currentTime = startTimeSec;
+                }
+                tryPlay();
+            });
+
+             // Optional: Handle errors
+             videoElement.addEventListener('error', (e) => {
+                console.error('Error loading video:', videoElement.error);
+                const errorMsg = videoElement.error ? ` (Code: ${videoElement.error.code}, Message: ${videoElement.error.message})` : '';
+                document.getElementById('videoFilename').textContent = `Error loading video${errorMsg}`;
+            });
+
+        } else {
+            console.error('No video token provided in URL.');
+            document.body.innerHTML = `<div style="color: white; text-align: center; padding-top: 50px;">Error: Invalid or missing video link.</div>`;
+        }
+    </script>
+</body>
+</html> 
