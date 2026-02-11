@@ -7,6 +7,8 @@ import SourceBadge from './SourceBadge';
 import MediaTypeBadge from './MediaTypeBadge';
 
 export default function MapView({ videos, selectedVideo, onVideoClick }) {
+  const mappableVideos = videos.filter(v => v.location !== null && v.location !== undefined && v.location.lat !== null && v.location.lat !== undefined);
+
   return (
     <div className="h-full w-full z-0">
       <MapContainer center={[0, 0]} zoom={2} className="h-full w-full">
@@ -15,7 +17,7 @@ export default function MapView({ videos, selectedVideo, onVideoClick }) {
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         />
         <MarkerClusterGroup>
-          {videos.map(video => (
+          {mappableVideos.map(video => (
             <Marker
               key={video.id}
               position={[video.location.lat, video.location.lon]}
@@ -34,7 +36,7 @@ export default function MapView({ videos, selectedVideo, onVideoClick }) {
             </Marker>
           ))}
         </MarkerClusterGroup>
-        <MapUpdater videos={videos} selectedVideo={selectedVideo} />
+        <MapUpdater videos={mappableVideos} selectedVideo={selectedVideo} />
       </MapContainer>
     </div>
   );
@@ -45,7 +47,7 @@ function MapUpdater({ videos, selectedVideo }) {
 
   // Zoom to selected video
   useEffect(() => {
-    if (selectedVideo) {
+    if (selectedVideo && selectedVideo.location) {
       map.setView([selectedVideo.location.lat, selectedVideo.location.lon], 16, { animate: true });
     }
   }, [selectedVideo, map]);

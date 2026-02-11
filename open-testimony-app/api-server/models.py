@@ -29,8 +29,8 @@ class Video(Base):
 
     # Temporal and spatial metadata
     timestamp = Column(DateTime, nullable=False, index=True)
-    latitude = Column(Float, nullable=False)
-    longitude = Column(Float, nullable=False)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
 
     # Categorization
     incident_tags = Column(ARRAY(String), nullable=True)

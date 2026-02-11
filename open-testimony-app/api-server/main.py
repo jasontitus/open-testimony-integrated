@@ -612,9 +612,9 @@ async def bulk_upload(
             # Extract EXIF from images (and attempt on video files too)
             exif = _extract_exif(bytes(file_bytes))
 
-            # Determine location from EXIF or default to 0,0
-            latitude = exif["lat"] if exif["lat"] is not None else 0.0
-            longitude = exif["lon"] if exif["lon"] is not None else 0.0
+            # Determine location from EXIF (None if unavailable)
+            latitude = exif["lat"]
+            longitude = exif["lon"]
 
             # Determine timestamp from EXIF or use current time
             if exif["datetime"]:
@@ -804,7 +804,7 @@ async def list_videos(
                 "id": str(v.id),
                 "device_id": v.device_id,
                 "timestamp": v.timestamp.isoformat(),
-                "location": {"lat": v.latitude, "lon": v.longitude},
+                "location": {"lat": v.latitude, "lon": v.longitude} if v.latitude is not None else None,
                 "incident_tags": v.incident_tags,
                 "source": v.source,
                 "media_type": v.media_type,
@@ -834,7 +834,7 @@ async def get_video_details(
         "object_name": video.object_name,
         "file_hash": video.file_hash,
         "timestamp": video.timestamp.isoformat(),
-        "location": {"lat": video.latitude, "lon": video.longitude},
+        "location": {"lat": video.latitude, "lon": video.longitude} if video.latitude is not None else None,
         "incident_tags": video.incident_tags,
         "source": video.source,
         "media_type": video.media_type,

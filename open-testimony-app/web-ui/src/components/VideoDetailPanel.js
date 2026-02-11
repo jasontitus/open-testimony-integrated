@@ -263,7 +263,7 @@ export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated
           <MetaCard label="Timestamp" value={format(new Date(d.timestamp), 'PPpp')} />
           <MetaCard label="Uploaded At" value={format(new Date(d.uploaded_at), 'PPpp')} />
           <MetaCard label="Device ID" value={d.device_id} mono />
-          <MetaCard label="Location" value={`${d.location?.lat?.toFixed(5)}, ${d.location?.lon?.toFixed(5)}`} />
+          <MetaCard label="Location" value={d.location ? `${d.location.lat.toFixed(5)}, ${d.location.lon.toFixed(5)}` : 'Unknown'} />
           {detail?.file_hash && <MetaCard label="File Hash (SHA-256)" value={detail.file_hash} mono span2 />}
         </div>
 
