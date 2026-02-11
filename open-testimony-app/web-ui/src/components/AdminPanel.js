@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
-import { UserPlus, Key, Shield, AlertCircle, Tag, Trash2, RefreshCw, Database, Upload, CheckCircle, XCircle, FileVideo, Image } from 'lucide-react';
+import { UserPlus, Key, Shield, AlertCircle, Tag, Trash2, RefreshCw, Database, Upload, CheckCircle, XCircle, FileVideo, Image, Plus } from 'lucide-react';
 import axios from 'axios';
 import api from '../api';
 
@@ -490,6 +490,8 @@ function TagManagement() {
   const [defaultTags, setDefaultTags] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [newTag, setNewTag] = useState('');
 
   const fetchTags = useCallback(async () => {
     try {
@@ -516,6 +518,19 @@ function TagManagement() {
       alert(err.response?.data?.detail || 'Failed to delete tag');
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const handleAddTag = async () => {
+    const tag = newTag.trim().toLowerCase();
+    if (!tag) return;
+    try {
+      await api.post('/tags', { tag });
+      setNewTag('');
+      setAdding(false);
+      fetchTags();
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to create tag');
     }
   };
 
@@ -567,6 +582,35 @@ function TagManagement() {
                 </button>
               </span>
             ))}
+            {adding ? (
+              <span className="flex items-center gap-1 px-2 py-1 rounded-full border border-green-500/50 bg-green-900/20">
+                <input
+                  autoFocus
+                  value={newTag}
+                  onChange={(e) => setNewTag(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAddTag();
+                    if (e.key === 'Escape') { setAdding(false); setNewTag(''); }
+                  }}
+                  placeholder="new tag"
+                  className="bg-transparent text-xs text-white outline-none w-24"
+                />
+                <button onClick={handleAddTag} className="text-green-400 hover:text-green-300">
+                  <CheckCircle size={12} />
+                </button>
+                <button onClick={() => { setAdding(false); setNewTag(''); }} className="text-gray-500 hover:text-gray-300">
+                  <XCircle size={12} />
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={() => setAdding(true)}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs border border-dashed border-gray-600 text-gray-500 hover:border-green-500/50 hover:text-green-400 transition"
+              >
+                <Plus size={12} />
+                Add tag
+              </button>
+            )}
           </div>
           <p className="text-[10px] text-gray-600 mt-3">
             Hover over a tag and click the trash icon to remove it from all videos. Default tags will remain in the autocomplete list.
