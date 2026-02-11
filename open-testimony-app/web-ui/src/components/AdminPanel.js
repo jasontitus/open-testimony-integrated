@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
-import { UserPlus, Key, Shield, AlertCircle, Tag, Trash2 } from 'lucide-react';
+import { UserPlus, Key, Shield, AlertCircle, Tag, Trash2, RefreshCw, Database } from 'lucide-react';
+import axios from 'axios';
 import api from '../api';
+
+const aiApi = axios.create({ baseURL: '/ai-search', withCredentials: true });
 
 export default function AdminPanel() {
   const [users, setUsers] = useState([]);
@@ -71,6 +74,9 @@ export default function AdminPanel() {
 
         {/* Tag Management */}
         <TagManagement />
+
+        {/* Indexing Management */}
+        <IndexingManagement />
       </div>
     </div>
   );
@@ -358,6 +364,103 @@ function TagManagement() {
           <p className="text-[10px] text-gray-600 mt-3">
             Hover over a tag and click the trash icon to remove it from all videos. Default tags will remain in the autocomplete list.
           </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IndexingManagement() {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [reindexing, setReindexing] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await aiApi.get('/indexing/status');
+      setStats(res.data);
+    } catch (err) {
+      console.error('Failed to load indexing stats:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchStats(); }, [fetchStats]);
+
+  const handleReindexAll = async () => {
+    if (!window.confirm('Re-index all videos? This will clear existing embeddings and re-process everything.')) return;
+    setReindexing(true);
+    setMessage(null);
+    try {
+      const res = await aiApi.post('/indexing/reindex-all');
+      setMessage({ type: 'success', text: `Queued ${res.data.count} videos for re-indexing` });
+      fetchStats();
+    } catch (err) {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to trigger reindex' });
+    } finally {
+      setReindexing(false);
+    }
+  };
+
+  const statusItems = stats ? [
+    { label: 'Completed', value: stats.completed ?? 0, color: 'text-green-400' },
+    { label: 'Processing', value: stats.processing ?? 0, color: 'text-yellow-400' },
+    { label: 'Pending', value: stats.pending ?? 0, color: 'text-blue-400' },
+    { label: 'Failed', value: stats.failed ?? 0, color: 'text-red-400' },
+  ] : [];
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Database size={20} className="text-purple-400" />
+          <h2 className="text-xl font-bold text-white">AI Indexing</h2>
+        </div>
+        <button
+          onClick={handleReindexAll}
+          disabled={reindexing}
+          className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-purple-800 text-white text-sm font-medium rounded-lg transition"
+        >
+          <RefreshCw size={14} className={reindexing ? 'animate-spin' : ''} />
+          {reindexing ? 'Queuing...' : 'Re-index All Videos'}
+        </button>
+      </div>
+
+      {message && (
+        <div className={`mb-4 p-3 rounded-lg flex items-center gap-2 text-sm ${
+          message.type === 'success'
+            ? 'bg-green-900/30 border border-green-500/50 text-green-400'
+            : 'bg-red-900/30 border border-red-500/50 text-red-400'
+        }`}>
+          {message.type === 'error' && <AlertCircle size={16} />}
+          {message.text}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
+        </div>
+      ) : stats ? (
+        <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
+          <div className="grid grid-cols-4 gap-4">
+            {statusItems.map(s => (
+              <div key={s.label} className="text-center">
+                <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>
+                <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">{s.label}</div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-gray-600 mt-3">
+            The bridge service polls for pending jobs every 10 seconds. Re-indexing clears all embeddings and re-queues every video.
+          </p>
+        </div>
+      ) : (
+        <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 text-center text-gray-500">
+          Could not load indexing status
         </div>
       )}
     </div>

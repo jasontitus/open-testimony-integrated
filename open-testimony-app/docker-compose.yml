@@ -27,9 +27,8 @@ services:
       - MINIO_SECRET_KEY=supersecret
       # External URL for video playback (presigned MinIO URLs)
       # For local dev: localhost:18080/video-stream (default)
-      # For ngrok: MINIO_EXTERNAL_ENDPOINT=opentestimony.ngrok.app/video-stream MINIO_EXTERNAL_SCHEME=https
-      - MINIO_EXTERNAL_ENDPOINT=${MINIO_EXTERNAL_ENDPOINT:-localhost:18080/video-stream}
-      - MINIO_EXTERNAL_SCHEME=${MINIO_EXTERNAL_SCHEME:-http}
+      - MINIO_EXTERNAL_ENDPOINT=opentestimony.ngrok.app/video-stream
+      - MINIO_EXTERNAL_SCHEME=https
       - MINIO_BUCKET=opentestimony-videos
       # Auth
       - JWT_SECRET_KEY=change-me-in-production-use-a-real-secret
