@@ -66,7 +66,7 @@ describe('AISearchResultCard', () => {
 
     render(<AISearchResultCard {...defaultProps} />);
 
-    expect(screen.getByTitle('Quick Tag')).toBeInTheDocument();
+    expect(screen.getByText('Annotate')).toBeInTheDocument();
   });
 
   test('shows tag button for admin users', () => {
@@ -74,7 +74,7 @@ describe('AISearchResultCard', () => {
 
     render(<AISearchResultCard {...defaultProps} />);
 
-    expect(screen.getByTitle('Quick Tag')).toBeInTheDocument();
+    expect(screen.getByText('Annotate')).toBeInTheDocument();
   });
 
   test('hides tag button for non-staff users', () => {
@@ -82,7 +82,7 @@ describe('AISearchResultCard', () => {
 
     render(<AISearchResultCard {...defaultProps} />);
 
-    expect(screen.queryByTitle('Quick Tag')).not.toBeInTheDocument();
+    expect(screen.queryByText('Annotate')).not.toBeInTheDocument();
   });
 
   test('clicking tag button opens QuickTagMenu', async () => {
@@ -90,7 +90,7 @@ describe('AISearchResultCard', () => {
 
     render(<AISearchResultCard {...defaultProps} />);
 
-    fireEvent.click(screen.getByTitle('Quick Tag'));
+    fireEvent.click(screen.getByText('Annotate'));
 
     await waitFor(() => {
       expect(screen.getByTestId('quick-tag-menu')).toBeInTheDocument();
@@ -102,7 +102,7 @@ describe('AISearchResultCard', () => {
 
     render(<AISearchResultCard {...defaultProps} />);
 
-    fireEvent.click(screen.getByTitle('Quick Tag'));
+    fireEvent.click(screen.getByText('Annotate'));
 
     expect(defaultProps.onClick).not.toHaveBeenCalled();
   });

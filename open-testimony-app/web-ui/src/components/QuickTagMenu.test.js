@@ -39,7 +39,7 @@ describe('QuickTagMenu', () => {
     render(<QuickTagMenu {...defaultProps} />);
 
     // Should show header
-    expect(screen.getByText('Quick Tag')).toBeInTheDocument();
+    expect(screen.getByText('Quick Annotate')).toBeInTheDocument();
 
     // Wait for tags to load
     await waitFor(() => {
@@ -55,7 +55,7 @@ describe('QuickTagMenu', () => {
   test('shows bulk header when multiple videos', async () => {
     render(<QuickTagMenu {...defaultProps} videoIds={['video-1', 'video-2']} />);
 
-    expect(screen.getByText('Tag 2 videos')).toBeInTheDocument();
+    expect(screen.getByText('Annotate 2 videos')).toBeInTheDocument();
   });
 
   test('fetches current tags for each video on mount', async () => {
@@ -90,7 +90,7 @@ describe('QuickTagMenu', () => {
       expect(screen.getByText('protest')).toBeInTheDocument();
     });
 
-    const filterInput = screen.getByPlaceholderText('Filter tags...');
+    const filterInput = screen.getByPlaceholderText('Filter or create tag...');
     await userEvent.type(filterInput, 'arr');
 
     expect(screen.getByText('arrest')).toBeInTheDocument();
@@ -98,17 +98,17 @@ describe('QuickTagMenu', () => {
     expect(screen.queryByText('traffic-stop')).not.toBeInTheDocument();
   });
 
-  test('shows "No tags found" when filter matches nothing', async () => {
+  test('shows create prompt when filter matches no existing tags', async () => {
     render(<QuickTagMenu {...defaultProps} />);
 
     await waitFor(() => {
       expect(screen.getByText('protest')).toBeInTheDocument();
     });
 
-    const filterInput = screen.getByPlaceholderText('Filter tags...');
+    const filterInput = screen.getByPlaceholderText('Filter or create tag...');
     await userEvent.type(filterInput, 'zzzznotag');
 
-    expect(screen.getByText('No tags found')).toBeInTheDocument();
+    expect(screen.getByText(/Press Enter or click Add to create/)).toBeInTheDocument();
   });
 
   test('clicking an inactive tag adds it and calls PUT', async () => {
