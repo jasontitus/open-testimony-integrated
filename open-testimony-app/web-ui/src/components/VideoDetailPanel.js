@@ -7,6 +7,7 @@ import VerificationBadge from './VerificationBadge';
 import SourceBadge from './SourceBadge';
 import MediaTypeBadge from './MediaTypeBadge';
 import QuickTagMenu from './QuickTagMenu';
+import AddressAutocomplete from './AddressAutocomplete';
 
 export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated, initialTimestampMs, availableTags: availableTagsProp, tagCounts, onVideoTagsChanged }) {
   const { user } = useAuth();
@@ -21,6 +22,7 @@ export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated
   // Editable fields
   const [category, setCategory] = useState('');
   const [locationDescription, setLocationDescription] = useState('');
+  const [geocodedLocation, setGeocodedLocation] = useState(null);
   const [notes, setNotes] = useState('');
   const [tags, setTags] = useState([]);
   const [localAvailableTags, setLocalAvailableTags] = useState([]);
@@ -31,6 +33,7 @@ export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated
   const syncFields = useCallback((d) => {
     setCategory(d.category || '');
     setLocationDescription(d.location_description || '');
+    setGeocodedLocation(null);
     setNotes(d.notes || '');
     setTags(d.incident_tags || []);
   }, []);
@@ -87,19 +90,25 @@ export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated
   // Check if any editable field has changed (category and tags save immediately)
   const hasChanges = detail && (
     locationDescription !== (detail.location_description || '') ||
-    notes !== (detail.notes || '')
+    notes !== (detail.notes || '') ||
+    geocodedLocation !== null
   );
 
   const handleSave = async () => {
     setSaving(true);
     setSaveError('');
     try {
-      await api.put(`/videos/${video.id}/annotations/web`, {
+      const payload = {
         category,
         location_description: locationDescription,
         notes,
         incident_tags: tags,
-      });
+      };
+      if (geocodedLocation) {
+        payload.latitude = geocodedLocation.lat;
+        payload.longitude = geocodedLocation.lon;
+      }
+      await api.put(`/videos/${video.id}/annotations/web`, payload);
       const updated = {
         category: category || null,
         location_description: locationDescription || null,
@@ -107,6 +116,10 @@ export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated
         incident_tags: tags,
         annotations_updated_at: new Date().toISOString(),
       };
+      if (geocodedLocation) {
+        updated.location = { lat: geocodedLocation.lat, lon: geocodedLocation.lon };
+      }
+      setGeocodedLocation(null);
       setDetail(prev => ({ ...prev, ...updated }));
       onVideoUpdated?.(video.id);
       // Refresh audit log
@@ -213,13 +226,17 @@ export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated
 
             <div>
               <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Location Description</label>
-              <input
-                type="text"
+              <AddressAutocomplete
                 value={locationDescription}
-                onChange={e => setLocationDescription(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-blue-500"
-                placeholder="e.g. Downtown near City Hall"
+                onChange={setLocationDescription}
+                onLocationSelect={(loc) => setGeocodedLocation({ lat: loc.lat, lon: loc.lon })}
+                placeholder="Search address or type location..."
               />
+              {geocodedLocation && (
+                <p className="mt-1 text-[10px] text-green-400">
+                  Coordinates: {geocodedLocation.lat.toFixed(5)}, {geocodedLocation.lon.toFixed(5)} (save to apply)
+                </p>
+              )}
             </div>
 
             {hasChanges && (

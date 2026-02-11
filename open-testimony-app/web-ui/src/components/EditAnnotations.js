@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { X, Save } from 'lucide-react';
 import api from '../api';
 import TagInput from './TagInput';
+import AddressAutocomplete from './AddressAutocomplete';
 
 const CATEGORIES = ['', 'interview', 'incident', 'documentation', 'other'];
 
 export default function EditAnnotations({ video, onSaved, onCancel }) {
   const [category, setCategory] = useState(video.category || '');
   const [locationDescription, setLocationDescription] = useState(video.location_description || '');
+  const [geocodedLocation, setGeocodedLocation] = useState(null);
   const [notes, setNotes] = useState(video.notes || '');
   const [tags, setTags] = useState(video.incident_tags || []);
   const [availableTags, setAvailableTags] = useState([]);
@@ -22,19 +24,28 @@ export default function EditAnnotations({ video, onSaved, onCancel }) {
     setSaving(true);
     setError('');
     try {
-      await api.put(`/videos/${video.id}/annotations/web`, {
+      const payload = {
         category,
         location_description: locationDescription,
         notes,
         incident_tags: tags,
-      });
-      onSaved({
+      };
+      if (geocodedLocation) {
+        payload.latitude = geocodedLocation.lat;
+        payload.longitude = geocodedLocation.lon;
+      }
+      await api.put(`/videos/${video.id}/annotations/web`, payload);
+      const result = {
         category: category || null,
         location_description: locationDescription || null,
         notes: notes || null,
         incident_tags: tags,
         annotations_updated_at: new Date().toISOString(),
-      });
+      };
+      if (geocodedLocation) {
+        result.location = { lat: geocodedLocation.lat, lon: geocodedLocation.lon };
+      }
+      onSaved(result);
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to save');
     } finally {
@@ -71,13 +82,17 @@ export default function EditAnnotations({ video, onSaved, onCancel }) {
 
         <div>
           <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">Location Description</label>
-          <input
-            type="text"
+          <AddressAutocomplete
             value={locationDescription}
-            onChange={e => setLocationDescription(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-            placeholder="e.g. Downtown intersection near City Hall"
+            onChange={setLocationDescription}
+            onLocationSelect={(loc) => setGeocodedLocation({ lat: loc.lat, lon: loc.lon })}
+            placeholder="Search address or type location..."
           />
+          {geocodedLocation && (
+            <p className="mt-1 text-[10px] text-green-400">
+              Coordinates: {geocodedLocation.lat.toFixed(5)}, {geocodedLocation.lon.toFixed(5)}
+            </p>
+          )}
         </div>
 
         <div>
