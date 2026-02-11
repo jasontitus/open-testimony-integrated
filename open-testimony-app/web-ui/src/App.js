@@ -53,10 +53,17 @@ const VALID_HASHES = ['map', 'list', 'ai-search', 'admin'];
 
 function readHash() {
   const raw = window.location.hash.replace('#', '');
-  const hash = VALID_HASHES.includes(raw) ? raw : 'map';
+  if (VALID_HASHES.includes(raw)) {
+    return {
+      viewMode: raw === 'admin' ? 'map' : raw,
+      showAdmin: raw === 'admin',
+    };
+  }
+  // Default to list on mobile (better browse experience), map on desktop
+  const isMobile = window.innerWidth < 768;
   return {
-    viewMode: hash === 'admin' ? 'map' : hash,
-    showAdmin: hash === 'admin',
+    viewMode: isMobile ? 'list' : 'map',
+    showAdmin: false,
   };
 }
 
@@ -276,9 +283,29 @@ function Dashboard() {
                     </div>
                   )}
                 </div>
+              ) : selectedVideo ? (
+                <div className="fixed inset-0 z-[10000] md:relative md:inset-auto md:z-auto h-full flex flex-col bg-gray-900">
+                  <button
+                    onClick={() => { setSelectedVideo(null); setInitialTimestampMs(null); }}
+                    className="flex items-center gap-2 px-4 py-3 text-gray-300 hover:text-white bg-gray-800 border-b border-gray-700 text-sm shrink-0 md:hidden"
+                  >
+                    <span className="text-lg">&larr;</span> Back to List
+                  </button>
+                  <div className="flex-1 overflow-y-auto overflow-x-hidden">
+                    <VideoDetailPanel
+                      video={selectedVideo}
+                      onVideoDeleted={handleVideoDeleted}
+                      onVideoUpdated={handleVideoUpdated}
+                      initialTimestampMs={initialTimestampMs}
+                      availableTags={availableTags}
+                      tagCounts={tagCounts}
+                      onVideoTagsChanged={handleVideoTagsChanged}
+                    />
+                  </div>
+                </div>
               ) : (
                 <VideoDetailPanel
-                  video={selectedVideo}
+                  video={null}
                   onVideoDeleted={handleVideoDeleted}
                   onVideoUpdated={handleVideoUpdated}
                   initialTimestampMs={initialTimestampMs}
