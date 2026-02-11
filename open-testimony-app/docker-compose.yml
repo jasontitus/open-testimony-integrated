@@ -37,6 +37,8 @@ services:
       - ADMIN_DISPLAY_NAME=Administrator
       # Bridge service URL for AI indexing webhook
       - BRIDGE_URL=http://bridge:8003
+      # Restrict geocode autocomplete to specific countries (comma-separated ISO 3166-1 codes, e.g. "us" or "us,ca")
+      - GEOCODE_COUNTRY_CODES=us
     depends_on:
       - db
       - minio

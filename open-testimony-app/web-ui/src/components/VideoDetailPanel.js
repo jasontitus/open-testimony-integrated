@@ -214,6 +214,32 @@ export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated
             </div>
 
             <div>
+              <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Location Description</label>
+              {d.location && d.source === 'live' ? (
+                <div className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-400">
+                  <p className="text-white">{locationDescription || 'No description'}</p>
+                  <p className="mt-1 text-[10px] text-green-400">
+                    Verified device location: {d.location.lat.toFixed(5)}, {d.location.lon.toFixed(5)}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <AddressAutocomplete
+                    value={locationDescription}
+                    onChange={setLocationDescription}
+                    onLocationSelect={(loc) => setGeocodedLocation({ lat: loc.lat, lon: loc.lon })}
+                    placeholder="Search address or type location..."
+                  />
+                  {geocodedLocation && (
+                    <p className="mt-1 text-[10px] text-green-400">
+                      Coordinates: {geocodedLocation.lat.toFixed(5)}, {geocodedLocation.lon.toFixed(5)} (save to apply)
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div>
               <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Notes</label>
               <textarea
                 value={notes}
@@ -222,21 +248,6 @@ export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
                 placeholder="Additional context or notes..."
               />
-            </div>
-
-            <div>
-              <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Location Description</label>
-              <AddressAutocomplete
-                value={locationDescription}
-                onChange={setLocationDescription}
-                onLocationSelect={(loc) => setGeocodedLocation({ lat: loc.lat, lon: loc.lon })}
-                placeholder="Search address or type location..."
-              />
-              {geocodedLocation && (
-                <p className="mt-1 text-[10px] text-green-400">
-                  Coordinates: {geocodedLocation.lat.toFixed(5)}, {geocodedLocation.lon.toFixed(5)} (save to apply)
-                </p>
-              )}
             </div>
 
             {hasChanges && (

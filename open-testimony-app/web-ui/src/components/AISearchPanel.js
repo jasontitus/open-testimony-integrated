@@ -5,6 +5,7 @@ import api from '../api';
 import { useAuth } from '../auth';
 import AISearchResultCard from './AISearchResultCard';
 import QuickTagMenu from './QuickTagMenu';
+import AddressAutocomplete from './AddressAutocomplete';
 
 const SEARCH_MODES = [
   { id: 'visual_text', label: 'Visual (Text)', icon: Film, description: 'Describe what you see' },
@@ -192,12 +193,19 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
   const [videoUrl, setVideoUrl] = useState(null);
   const [videoLoading, setVideoLoading] = useState(false);
   const videoRef = useRef(null);
+  const searchInputRef = useRef(null);
+
+  // Auto-focus search input on mount
+  useEffect(() => {
+    if (searchInputRef.current) searchInputRef.current.focus();
+  }, []);
 
   // Annotation panel state
   const canEdit = user?.role === 'admin' || user?.role === 'staff';
   const [videoDetail, setVideoDetail] = useState(null);
   const [annotationNotes, setAnnotationNotes] = useState('');
   const [annotationLocation, setAnnotationLocation] = useState('');
+  const [geocodedLocation, setGeocodedLocation] = useState(null);
   const [annotationSaving, setAnnotationSaving] = useState(false);
   const [annotationSaveError, setAnnotationSaveError] = useState('');
   const [annotationSaved, setAnnotationSaved] = useState(false);
@@ -352,10 +360,16 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
     setAnnotationSaveError('');
     setAnnotationSaved(false);
     try {
-      await api.put(`/videos/${activeResult.video_id}/annotations/web`, {
+      const payload = {
         notes: annotationNotes || null,
         location_description: annotationLocation || null,
-      });
+      };
+      if (geocodedLocation) {
+        payload.latitude = geocodedLocation.lat;
+        payload.longitude = geocodedLocation.lon;
+      }
+      await api.put(`/videos/${activeResult.video_id}/annotations/web`, payload);
+      setGeocodedLocation(null);
       setAnnotationSaved(true);
       setTimeout(() => setAnnotationSaved(false), 2000);
       onVideoTagsChanged?.(activeResult.video_id);
@@ -446,6 +460,7 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
             </label>
           ) : (
             <input
+              ref={searchInputRef}
               type="text"
               value={query}
               onChange={e => setQuery(e.target.value)}
@@ -544,6 +559,36 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
                   inline
                 />
 
+                {/* Location description */}
+                <div>
+                  <label className="flex items-center gap-1.5 text-[10px] text-gray-500 uppercase font-bold mb-1">
+                    <MapPin size={10} />
+                    Location
+                  </label>
+                  {videoDetail.location && videoDetail.source === 'live' ? (
+                    <div className="px-2 py-1.5 bg-gray-900 border border-gray-700 rounded text-xs text-gray-400">
+                      <p className="text-white">{annotationLocation || 'No description'}</p>
+                      <p className="mt-1 text-[10px] text-green-400">
+                        Verified device location: {videoDetail.location.lat.toFixed(5)}, {videoDetail.location.lon.toFixed(5)}
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <AddressAutocomplete
+                        value={annotationLocation}
+                        onChange={(val) => { setAnnotationLocation(val); setAnnotationSaved(false); }}
+                        onLocationSelect={(loc) => { setGeocodedLocation({ lat: loc.lat, lon: loc.lon }); setAnnotationSaved(false); }}
+                        placeholder="Search address or type location..."
+                      />
+                      {geocodedLocation && (
+                        <p className="mt-1 text-[10px] text-green-400">
+                          Coordinates: {geocodedLocation.lat.toFixed(5)}, {geocodedLocation.lon.toFixed(5)} (save to apply)
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+
                 {/* Notes */}
                 <div>
                   <label className="flex items-center gap-1.5 text-[10px] text-gray-500 uppercase font-bold mb-1">
@@ -556,21 +601,6 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
                     placeholder="Add notes about this video..."
                     rows={2}
                     className="w-full px-2 py-1.5 bg-gray-900 border border-gray-700 rounded text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-y"
-                  />
-                </div>
-
-                {/* Location description */}
-                <div>
-                  <label className="flex items-center gap-1.5 text-[10px] text-gray-500 uppercase font-bold mb-1">
-                    <MapPin size={10} />
-                    Location
-                  </label>
-                  <input
-                    type="text"
-                    value={annotationLocation}
-                    onChange={e => { setAnnotationLocation(e.target.value); setAnnotationSaved(false); }}
-                    placeholder="Location description..."
-                    className="w-full px-2 py-1.5 bg-gray-900 border border-gray-700 rounded text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
                   />
                 </div>
 

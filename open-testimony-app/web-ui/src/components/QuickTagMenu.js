@@ -24,6 +24,7 @@ export default function QuickTagMenu({ videoIds, availableTags, tagCounts, onClo
   const [saving, setSaving] = useState({});               // { videoId: true }
   const [localTags, setLocalTags] = useState([]);          // newly created tags this session
   const [creating, setCreating] = useState(false);
+  const [showAddInput, setShowAddInput] = useState(false);
   const menuRef = useRef(null);
   const filterRef = useRef(null);
 
@@ -265,32 +266,48 @@ export default function QuickTagMenu({ videoIds, availableTags, tagCounts, onClo
         </div>
       )}
 
+      {/* Separator between categories and tags (inline only) */}
+      {inline && !loading && <hr className="border-gray-700 mb-3" />}
+
       {/* Filter / create */}
-      <div className={inline ? 'mb-2' : 'px-3 py-2 border-b border-gray-700'}>
-        {!inline && <p className="text-[10px] text-gray-500 uppercase font-bold mb-1.5">Tags</p>}
-        <div className="flex gap-1">
-          <input
-            ref={filterRef}
-            type="text"
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-            onKeyDown={handleFilterKeyDown}
-            placeholder="Filter or create tag..."
-            className="flex-1 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
-          />
-          {filter.trim() && !filterMatchesExisting && (
-            <button
-              onClick={handleCreateTag}
-              disabled={creating || anySaving}
-              className="px-2 py-1 bg-green-700 hover:bg-green-600 disabled:bg-green-900 text-white text-xs rounded transition flex items-center gap-1 shrink-0"
-              title="Create new tag"
-            >
-              <Plus size={12} />
-              Add
-            </button>
-          )}
+      {(!inline || showAddInput) && (
+        <div className={inline ? 'mb-2' : 'px-3 py-2 border-b border-gray-700'}>
+          {!inline && <p className="text-[10px] text-gray-500 uppercase font-bold mb-1.5">Tags</p>}
+          <div className="flex gap-1">
+            <input
+              ref={filterRef}
+              type="text"
+              value={filter}
+              onChange={e => setFilter(e.target.value)}
+              onKeyDown={(e) => {
+                handleFilterKeyDown(e);
+                if (e.key === 'Escape') { setShowAddInput(false); setFilter(''); }
+              }}
+              placeholder={inline ? 'Type new tag name...' : 'Filter or create tag...'}
+              className="flex-1 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
+            />
+            {filter.trim() && !filterMatchesExisting && (
+              <button
+                onClick={handleCreateTag}
+                disabled={creating || anySaving}
+                className="px-2 py-1 bg-green-700 hover:bg-green-600 disabled:bg-green-900 text-white text-xs rounded transition flex items-center gap-1 shrink-0"
+                title="Create new tag"
+              >
+                <Plus size={12} />
+                Add
+              </button>
+            )}
+            {inline && (
+              <button
+                onClick={() => { setShowAddInput(false); setFilter(''); }}
+                className="px-2 py-1 text-gray-500 hover:text-white text-xs transition"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Tag list */}
       <div className={inline ? '' : 'max-h-56 overflow-y-auto p-2'}>
@@ -322,6 +339,15 @@ export default function QuickTagMenu({ videoIds, availableTags, tagCounts, onClo
                 </button>
               );
             })}
+            {inline && !showAddInput && (
+              <button
+                onClick={() => { setShowAddInput(true); setTimeout(() => filterRef.current?.focus(), 0); }}
+                className="px-2.5 py-1 rounded-full text-xs font-medium transition border border-dashed border-gray-600 text-gray-500 hover:border-gray-400 hover:text-gray-300 flex items-center gap-1"
+              >
+                <Plus size={10} />
+                Add tag
+              </button>
+            )}
             {filter.trim() && !filterMatchesExisting && filteredTags.length === 0 && (
               <p className="text-xs text-gray-500 py-1">Press Enter or click Add to create "{filter.trim().toLowerCase()}"</p>
             )}

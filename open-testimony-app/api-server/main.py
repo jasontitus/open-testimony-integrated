@@ -1395,14 +1395,18 @@ async def geocode_search(
         return {"results": []}
 
     async with httpx.AsyncClient(timeout=5.0) as client:
+        params = {
+            "q": q.strip(),
+            "format": "jsonv2",
+            "addressdetails": 1,
+            "limit": 6,
+        }
+        country_codes = os.environ.get("GEOCODE_COUNTRY_CODES", "")
+        if country_codes:
+            params["countrycodes"] = country_codes
         resp = await client.get(
             "https://nominatim.openstreetmap.org/search",
-            params={
-                "q": q.strip(),
-                "format": "jsonv2",
-                "addressdetails": 1,
-                "limit": 6,
-            },
+            params=params,
             headers={
                 "User-Agent": "OpenTestimony/1.0",
                 "Accept-Language": "en",
