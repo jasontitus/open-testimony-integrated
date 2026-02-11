@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Search, Upload, Film, MessageSquare, Loader, X, CheckSquare, Tag } from 'lucide-react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { Search, Upload, Film, MessageSquare, Loader, X, CheckSquare, Tag, ChevronDown, ChevronRight, Square, Save, MapPin, FileText } from 'lucide-react';
 import axios from 'axios';
 import api from '../api';
 import { useAuth } from '../auth';
@@ -18,6 +18,165 @@ const aiApi = axios.create({
   withCredentials: true,
 });
 
+// --- Inline component: collapsible group of results for one video ---
+function VideoResultGroup({
+  group, mode, onResultClick, onVideoClick, availableTags, tagCounts, onVideoTagsChanged,
+  canEdit, selectMode, selectedResults, onToggleSelect, isResultSelected,
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const best = group.results[0];
+  const count = group.results.length;
+  const scorePercent = group.bestScore != null ? Math.round(group.bestScore * 100) : null;
+  const isVisual = mode === 'visual_text' || mode === 'visual_image';
+
+  const thumbnailUrl = best.thumbnail_url ? `/ai-search${best.thumbnail_url}` : null;
+  const [imgError, setImgError] = useState(false);
+
+  const displayTags = best.incident_tags || [];
+  const displayCategory = best.category || null;
+
+  // Check if all results in this group are selected
+  const allSelected = group.results.every(r => isResultSelected(r));
+  const someSelected = !allSelected && group.results.some(r => isResultSelected(r));
+
+  const handleGroupCheckbox = (e) => {
+    e.stopPropagation();
+    if (allSelected) {
+      group.results.forEach(r => {
+        if (isResultSelected(r)) onToggleSelect(r);
+      });
+    } else {
+      group.results.forEach(r => {
+        if (!isResultSelected(r)) onToggleSelect(r);
+      });
+    }
+  };
+
+  // Open the video-level player + annotation panel (no specific timestamp)
+  const handleHeaderClick = () => {
+    onVideoClick(group.video_id, best);
+  };
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+      {/* Group header row — clicking opens player + annotations for the whole video */}
+      <div className="flex items-center cursor-pointer hover:bg-gray-750" onClick={handleHeaderClick}>
+        {/* Checkbox for bulk select */}
+        {selectMode && (
+          <button
+            onClick={handleGroupCheckbox}
+            className="flex items-center justify-center w-8 shrink-0 bg-gray-900/50 hover:bg-gray-700 transition"
+          >
+            {allSelected ? (
+              <CheckSquare size={16} className="text-blue-400" />
+            ) : someSelected ? (
+              <CheckSquare size={16} className="text-blue-400/50" />
+            ) : (
+              <Square size={16} className="text-gray-600" />
+            )}
+          </button>
+        )}
+
+        {/* Thumbnail */}
+        <div className="w-28 h-20 bg-gray-900 shrink-0 relative">
+          {thumbnailUrl && !imgError ? (
+            <img src={thumbnailUrl} alt="" className="w-full h-full object-cover" onError={() => setImgError(true)} />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center">
+              <Film size={20} className="text-gray-700" />
+            </div>
+          )}
+          <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 hover:opacity-100 transition-opacity">
+            <Film size={20} className="text-white" />
+          </div>
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 px-3 py-2 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            {isVisual ? (
+              <Film size={12} className="text-purple-400 shrink-0" />
+            ) : (
+              <MessageSquare size={12} className="text-green-400 shrink-0" />
+            )}
+            <span className="text-xs font-mono text-gray-400 truncate">
+              {group.video_id.slice(0, 8)}...
+            </span>
+            <span className="px-1.5 py-0.5 bg-blue-900/30 border border-blue-500/30 rounded-full text-[10px] text-blue-300 font-medium shrink-0">
+              {count} match{count !== 1 ? 'es' : ''}
+            </span>
+          </div>
+
+          {/* Score bar */}
+          {scorePercent != null && (
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${scorePercent}%`,
+                    backgroundColor: scorePercent > 70 ? '#22c55e' : scorePercent > 40 ? '#eab308' : '#ef4444',
+                  }}
+                />
+              </div>
+              <span className="text-[10px] font-mono text-gray-400">{scorePercent}%</span>
+            </div>
+          )}
+
+          {/* Category + Tags */}
+          {(displayCategory || displayTags.length > 0) && (
+            <div className="flex flex-wrap gap-1">
+              {displayCategory && (
+                <span className="px-1.5 py-0.5 bg-amber-900/20 border border-amber-500/30 rounded-full text-[10px] text-amber-300">
+                  {displayCategory}
+                </span>
+              )}
+              {displayTags.slice(0, 3).map(tag => (
+                <span key={tag} className="px-1.5 py-0.5 bg-blue-900/20 border border-blue-500/30 rounded-full text-[10px] text-blue-300">
+                  {tag}
+                </span>
+              ))}
+              {displayTags.length > 3 && (
+                <span className="text-[10px] text-gray-500">+{displayTags.length - 3}</span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Expand chevron — separate click target */}
+        <button
+          onClick={(e) => { e.stopPropagation(); setExpanded(prev => !prev); }}
+          className="px-3 py-2 shrink-0 text-gray-500 hover:text-white transition"
+          title={expanded ? 'Collapse matches' : 'Expand matches'}
+        >
+          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </button>
+      </div>
+
+      {/* Expanded: individual result cards (for jumping to specific timestamps) */}
+      {expanded && (
+        <div className="border-t border-gray-700 bg-gray-850 space-y-1 p-2">
+          <p className="text-[10px] text-gray-500 uppercase font-bold px-1 mb-1">Individual matches (click to jump to timestamp)</p>
+          {group.results.map((result, i) => (
+            <AISearchResultCard
+              key={`${result.video_id}-${result.timestamp_ms || result.start_ms}-${i}`}
+              result={result}
+              mode={mode}
+              onClick={onResultClick}
+              availableTags={availableTags}
+              tagCounts={tagCounts}
+              onVideoTagsChanged={onVideoTagsChanged}
+              selectable={selectMode}
+              selected={isResultSelected(result)}
+              onToggleSelect={onToggleSelect}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AISearchPanel({ onResultClick, availableTags, tagCounts, onVideoTagsChanged }) {
   const { user } = useAuth();
   const [mode, setMode] = useState('visual_text');
@@ -34,8 +193,16 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
   const [videoLoading, setVideoLoading] = useState(false);
   const videoRef = useRef(null);
 
-  // Bulk selection state
+  // Annotation panel state
   const canEdit = user?.role === 'admin' || user?.role === 'staff';
+  const [videoDetail, setVideoDetail] = useState(null);
+  const [annotationNotes, setAnnotationNotes] = useState('');
+  const [annotationLocation, setAnnotationLocation] = useState('');
+  const [annotationSaving, setAnnotationSaving] = useState(false);
+  const [annotationSaveError, setAnnotationSaveError] = useState('');
+  const [annotationSaved, setAnnotationSaved] = useState(false);
+
+  // Bulk selection state
   const [selectMode, setSelectMode] = useState(false);
   const [selectedResults, setSelectedResults] = useState([]); // array of result objects
   const [showBulkTagMenu, setShowBulkTagMenu] = useState(false);
@@ -51,6 +218,24 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
 
   React.useEffect(() => { fetchStats(); }, [fetchStats]);
 
+  // Group results by video_id
+  const groupedResults = useMemo(() => {
+    const groups = [];
+    const seen = new Map();
+    for (const r of results) {
+      if (!seen.has(r.video_id)) {
+        const group = { video_id: r.video_id, results: [r], bestScore: r.score ?? 0 };
+        seen.set(r.video_id, group);
+        groups.push(group);
+      } else {
+        const group = seen.get(r.video_id);
+        group.results.push(r);
+        if ((r.score ?? 0) > group.bestScore) group.bestScore = r.score ?? 0;
+      }
+    }
+    return groups;
+  }, [results]);
+
   const handleSearch = async (e) => {
     e.preventDefault();
     if (mode !== 'visual_image' && !query.trim()) return;
@@ -61,6 +246,7 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
     setResults([]);
     setActiveResult(null);
     setVideoUrl(null);
+    setVideoDetail(null);
     setSelectedResults([]);
 
     try {
@@ -79,20 +265,21 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
       const rawResults = res.data.results || [];
       setResults(rawResults);
 
-      // Enrich results with existing tags from the API
+      // Enrich results with existing tags + category from the API
       const uniqueIds = [...new Set(rawResults.map(r => r.video_id))];
-      const tagMap = {};
+      const detailMap = {};
       await Promise.all(uniqueIds.map(async (id) => {
         try {
           const vRes = await api.get(`/videos/${id}`);
-          tagMap[id] = vRes.data.incident_tags || [];
+          detailMap[id] = { incident_tags: vRes.data.incident_tags || [], category: vRes.data.category || null };
         } catch {
-          tagMap[id] = [];
+          detailMap[id] = { incident_tags: [], category: null };
         }
       }));
       setResults(prev => prev.map(r => ({
         ...r,
-        incident_tags: tagMap[r.video_id] || [],
+        incident_tags: detailMap[r.video_id]?.incident_tags || [],
+        category: detailMap[r.video_id]?.category || null,
       })));
     } catch (err) {
       setError(err.response?.data?.detail || 'Search failed. Is the bridge service running?');
@@ -101,15 +288,28 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
     }
   };
 
-  // When a result is clicked, open inline player
-  const handleResultClick = async (result) => {
-    if (selectMode) return; // In select mode, clicks toggle selection
-    setActiveResult(result);
+  // Open a video (from group header click) — plays from start, shows annotations
+  const handleVideoClick = async (videoId, bestResult) => {
+    if (selectMode) return;
+    // Use a synthetic result with no timestamp so the player starts from 0
+    setActiveResult({ ...bestResult, _noSeek: true });
     setVideoUrl(null);
     setVideoLoading(true);
+    setVideoDetail(null);
+    setAnnotationNotes('');
+    setAnnotationLocation('');
+    setAnnotationSaveError('');
+    setAnnotationSaved(false);
+
     try {
-      const res = await api.get(`/videos/${result.video_id}/url`);
-      setVideoUrl(res.data.url);
+      const [urlRes, detailRes] = await Promise.all([
+        api.get(`/videos/${videoId}/url`),
+        api.get(`/videos/${videoId}`),
+      ]);
+      setVideoUrl(urlRes.data.url);
+      setVideoDetail(detailRes.data);
+      setAnnotationNotes(detailRes.data.notes || '');
+      setAnnotationLocation(detailRes.data.location_description || '');
     } catch {
       setVideoUrl(null);
     } finally {
@@ -117,9 +317,59 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
     }
   };
 
-  // Seek to timestamp when video loads
+  // When a specific result is clicked (from expanded list), seek to its timestamp
+  const handleResultClick = async (result) => {
+    if (selectMode) return;
+    setActiveResult(result);
+    setVideoUrl(null);
+    setVideoLoading(true);
+    setVideoDetail(null);
+    setAnnotationNotes('');
+    setAnnotationLocation('');
+    setAnnotationSaveError('');
+    setAnnotationSaved(false);
+
+    try {
+      const [urlRes, detailRes] = await Promise.all([
+        api.get(`/videos/${result.video_id}/url`),
+        api.get(`/videos/${result.video_id}`),
+      ]);
+      setVideoUrl(urlRes.data.url);
+      setVideoDetail(detailRes.data);
+      setAnnotationNotes(detailRes.data.notes || '');
+      setAnnotationLocation(detailRes.data.location_description || '');
+    } catch {
+      setVideoUrl(null);
+    } finally {
+      setVideoLoading(false);
+    }
+  };
+
+  // Save annotations (notes + location_description)
+  const handleAnnotationSave = async () => {
+    if (!activeResult || !videoDetail) return;
+    setAnnotationSaving(true);
+    setAnnotationSaveError('');
+    setAnnotationSaved(false);
+    try {
+      await api.put(`/videos/${activeResult.video_id}/annotations/web`, {
+        notes: annotationNotes || null,
+        location_description: annotationLocation || null,
+      });
+      setAnnotationSaved(true);
+      setTimeout(() => setAnnotationSaved(false), 2000);
+      onVideoTagsChanged?.(activeResult.video_id);
+    } catch (err) {
+      setAnnotationSaveError(err.response?.data?.detail || 'Failed to save');
+    } finally {
+      setAnnotationSaving(false);
+    }
+  };
+
+  // Seek to timestamp when video loads (skip for video-level clicks)
   useEffect(() => {
     if (!activeResult || !videoRef.current || !videoUrl) return;
+    if (activeResult._noSeek) return; // Video-level click — play from start
     const seekMs = activeResult.timestamp_ms || activeResult.start_ms || 0;
     const seekSec = seekMs / 1000;
     const el = videoRef.current;
@@ -137,14 +387,14 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
   // Bulk selection helpers
   const toggleSelectResult = (result) => {
     setSelectedResults(prev => {
-      const exists = prev.find(r => r.video_id === result.video_id);
-      if (exists) return prev.filter(r => r.video_id !== result.video_id);
+      const exists = prev.find(r => r.video_id === result.video_id && (r.timestamp_ms || r.start_ms) === (result.timestamp_ms || result.start_ms));
+      if (exists) return prev.filter(r => !(r.video_id === result.video_id && (r.timestamp_ms || r.start_ms) === (result.timestamp_ms || result.start_ms)));
       return [...prev, result];
     });
   };
 
   const isResultSelected = (result) => {
-    return selectedResults.some(r => r.video_id === result.video_id);
+    return selectedResults.some(r => r.video_id === result.video_id && (r.timestamp_ms || r.start_ms) === (result.timestamp_ms || result.start_ms));
   };
 
   // Deduplicated video IDs for bulk tagging
@@ -228,21 +478,22 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
 
       {/* Main content: player + results */}
       <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
-        {/* Inline video player (shown when a result is clicked) */}
+        {/* Inline video player + annotation panel (shown when a result is clicked) */}
         {activeResult && !selectMode && (
-          <div className="md:w-1/2 lg:w-3/5 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-gray-700">
+          <div className="md:w-1/2 lg:w-3/5 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-gray-700 overflow-y-auto">
             <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
               <span className="text-xs text-gray-400 font-mono">
-                {activeResult.video_id.slice(0, 8)}... @ {formatTimestamp(activeResult.timestamp_ms || activeResult.start_ms || 0)}
+                {activeResult.video_id.slice(0, 8)}...
+                {activeResult._noSeek ? '' : ` @ ${formatTimestamp(activeResult.timestamp_ms || activeResult.start_ms || 0)}`}
               </span>
               <button
-                onClick={() => { setActiveResult(null); setVideoUrl(null); }}
+                onClick={() => { setActiveResult(null); setVideoUrl(null); setVideoDetail(null); }}
                 className="text-gray-500 hover:text-white transition"
               >
                 <X size={16} />
               </button>
             </div>
-            <div className="flex-1 bg-black flex items-center justify-center min-h-[200px]">
+            <div className="bg-black flex items-center justify-center min-h-[200px]">
               {videoLoading ? (
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
               ) : videoUrl ? (
@@ -261,6 +512,89 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
             {activeResult.segment_text && (
               <div className="px-4 py-2 bg-gray-800 border-t border-gray-700">
                 <p className="text-sm text-gray-300">&ldquo;{activeResult.segment_text}&rdquo;</p>
+              </div>
+            )}
+
+            {/* Annotation panel */}
+            {canEdit && videoDetail && (
+              <div className="border-t-2 border-blue-500 bg-gray-800 px-4 py-3 space-y-3">
+                <p className="text-[10px] text-blue-400 uppercase font-bold tracking-wider flex items-center gap-1.5">
+                  <Tag size={10} />
+                  Annotations
+                </p>
+
+                {/* QuickTagMenu inline */}
+                <QuickTagMenu
+                  videoIds={[activeResult.video_id]}
+                  availableTags={availableTags || []}
+                  tagCounts={tagCounts}
+                  onClose={() => {}}
+                  onTagsChanged={(videoId, newTags) => {
+                    // Update tags in results list too
+                    setResults(prev => prev.map(r =>
+                      r.video_id === videoId ? { ...r, incident_tags: newTags } : r
+                    ));
+                    onVideoTagsChanged?.(videoId, newTags);
+                  }}
+                  onCategoryChanged={(videoId, newCat) => {
+                    setResults(prev => prev.map(r =>
+                      r.video_id === videoId ? { ...r, category: newCat } : r
+                    ));
+                  }}
+                  inline
+                />
+
+                {/* Notes */}
+                <div>
+                  <label className="flex items-center gap-1.5 text-[10px] text-gray-500 uppercase font-bold mb-1">
+                    <FileText size={10} />
+                    Notes
+                  </label>
+                  <textarea
+                    value={annotationNotes}
+                    onChange={e => { setAnnotationNotes(e.target.value); setAnnotationSaved(false); }}
+                    placeholder="Add notes about this video..."
+                    rows={2}
+                    className="w-full px-2 py-1.5 bg-gray-900 border border-gray-700 rounded text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-y"
+                  />
+                </div>
+
+                {/* Location description */}
+                <div>
+                  <label className="flex items-center gap-1.5 text-[10px] text-gray-500 uppercase font-bold mb-1">
+                    <MapPin size={10} />
+                    Location
+                  </label>
+                  <input
+                    type="text"
+                    value={annotationLocation}
+                    onChange={e => { setAnnotationLocation(e.target.value); setAnnotationSaved(false); }}
+                    placeholder="Location description..."
+                    className="w-full px-2 py-1.5 bg-gray-900 border border-gray-700 rounded text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Save button + error */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleAnnotationSave}
+                    disabled={annotationSaving}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-xs font-medium rounded-lg transition"
+                  >
+                    {annotationSaving ? (
+                      <Loader size={12} className="animate-spin" />
+                    ) : (
+                      <Save size={12} />
+                    )}
+                    {annotationSaving ? 'Saving...' : 'Save'}
+                  </button>
+                  {annotationSaved && (
+                    <span className="text-xs text-green-400">Saved</span>
+                  )}
+                  {annotationSaveError && (
+                    <span className="text-xs text-red-400">{annotationSaveError}</span>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -290,7 +624,9 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
           {results.length > 0 && (
             <>
               <div className="flex items-center justify-between mb-3">
-                <p className="text-xs text-gray-500">{results.length} results</p>
+                <p className="text-xs text-gray-500">
+                  {results.length} result{results.length !== 1 ? 's' : ''} across {groupedResults.length} video{groupedResults.length !== 1 ? 's' : ''}
+                </p>
                 {canEdit && (
                   <button
                     onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
@@ -306,18 +642,21 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
                 )}
               </div>
               <div className="space-y-2 pb-16">
-                {results.map((result, i) => (
-                  <AISearchResultCard
-                    key={`${result.video_id}-${result.timestamp_ms || result.start_ms}-${i}`}
-                    result={result}
+                {groupedResults.map((group) => (
+                  <VideoResultGroup
+                    key={group.video_id}
+                    group={group}
                     mode={mode}
-                    onClick={handleResultClick}
+                    onVideoClick={handleVideoClick}
+                    onResultClick={handleResultClick}
                     availableTags={availableTags}
                     tagCounts={tagCounts}
                     onVideoTagsChanged={onVideoTagsChanged}
-                    selectable={selectMode}
-                    selected={isResultSelected(result)}
+                    canEdit={canEdit}
+                    selectMode={selectMode}
+                    selectedResults={selectedResults}
                     onToggleSelect={toggleSelectResult}
+                    isResultSelected={isResultSelected}
                   />
                 ))}
               </div>
