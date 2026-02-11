@@ -19,6 +19,10 @@ build/
 
 # Virtual environments
 test_venv/
+bridge/.venv/
+
+# Local bridge runtime data
+data/
 
 # Claude Code
 .claude/
