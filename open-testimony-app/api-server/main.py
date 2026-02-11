@@ -1048,6 +1048,8 @@ class ResetPasswordRequest(BaseModel):
 class WebAnnotationUpdate(BaseModel):
     category: Optional[str] = None
     location_description: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     notes: Optional[str] = None
     incident_tags: Optional[list] = None
 
@@ -1256,6 +1258,8 @@ async def update_annotations_web(
     old_values = {
         "category": video.category,
         "location_description": video.location_description,
+        "latitude": video.latitude,
+        "longitude": video.longitude,
         "notes": video.notes,
         "incident_tags": video.incident_tags,
     }
@@ -1264,6 +1268,10 @@ async def update_annotations_web(
         video.category = body.category if body.category != "" else None
     if body.location_description is not None:
         video.location_description = body.location_description if body.location_description != "" else None
+    if body.latitude is not None:
+        video.latitude = body.latitude
+    if body.longitude is not None:
+        video.longitude = body.longitude
     if body.notes is not None:
         video.notes = body.notes if body.notes != "" else None
     if body.incident_tags is not None:
@@ -1280,6 +1288,8 @@ async def update_annotations_web(
             "new": {
                 "category": video.category,
                 "location_description": video.location_description,
+                "latitude": video.latitude,
+                "longitude": video.longitude,
                 "notes": video.notes,
                 "incident_tags": video.incident_tags,
             },
@@ -1333,6 +1343,47 @@ async def delete_tag(
     db.commit()
 
     return {"status": "success", "tag": tag, "videos_affected": count}
+
+
+# --- Geocode Proxy (for address autocomplete) ---
+
+@app.get("/geocode/search")
+async def geocode_search(
+    q: str,
+    _user: User = Depends(require_staff),
+):
+    """Proxy address lookup to OpenStreetMap Nominatim for location autocomplete."""
+    if not q or len(q.strip()) < 3:
+        return {"results": []}
+
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={
+                "q": q.strip(),
+                "format": "jsonv2",
+                "addressdetails": 1,
+                "limit": 6,
+            },
+            headers={
+                "User-Agent": "OpenTestimony/1.0",
+                "Accept-Language": "en",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    results = [
+        {
+            "display_name": item["display_name"],
+            "lat": float(item["lat"]),
+            "lon": float(item["lon"]),
+            "type": item.get("type", ""),
+            "importance": item.get("importance", 0),
+        }
+        for item in data
+    ]
+    return {"results": results}
 
 
 @app.delete("/videos/{video_id}")
