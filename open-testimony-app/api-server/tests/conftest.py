@@ -113,6 +113,34 @@ def registered_device(db_session):
     return device.device_id
 
 
+@pytest.fixture
+def admin_user(db_session):
+    """Insert an admin user and return the User object."""
+    from auth import hash_password
+    user = User(
+        username="test-admin",
+        password_hash=hash_password("testpass"),
+        display_name="Test Admin",
+        role="admin",
+        is_active=True,
+        created_at=datetime.utcnow(),
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture
+def admin_client(app, admin_user):
+    """TestClient with an admin auth cookie set."""
+    from auth import create_access_token
+    token = create_access_token({"sub": admin_user.username})
+    c = TestClient(app)
+    c.cookies.set("access_token", token)
+    return c
+
+
 def make_upload_payload(video_bytes: bytes, device_id: str = "test-device-001"):
     """Build the metadata JSON and video bytes for an upload request."""
     file_hash = hashlib.sha256(video_bytes).hexdigest()
