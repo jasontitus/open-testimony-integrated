@@ -105,16 +105,27 @@ def load_text_model():
 
 
 def load_caption_model():
-    """Load the caption model (Qwen3-VL) for frame description generation."""
+    """Load the caption model for frame description generation.
+
+    Only loads local Qwen3-VL when CAPTION_PROVIDER=local.
+    For Gemini provider, no local model is needed.
+    """
     global caption_model, caption_processor
 
     if not settings.CAPTION_ENABLED:
         logger.info("Caption model disabled (CAPTION_ENABLED=false)")
         return
 
+    if settings.CAPTION_PROVIDER == "gemini":
+        logger.info(
+            f"Captioning via Gemini API (model={settings.CAPTION_MODEL_NAME}). "
+            f"No local caption model to load."
+        )
+        return
+
     from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
 
-    logger.info(f"Loading caption model: {settings.CAPTION_MODEL_NAME}")
+    logger.info(f"Loading local caption model: {settings.CAPTION_MODEL_NAME}")
     caption_processor = AutoProcessor.from_pretrained(settings.CAPTION_MODEL_NAME)
     caption_model = Qwen3VLForConditionalGeneration.from_pretrained(
         settings.CAPTION_MODEL_NAME,
@@ -124,7 +135,7 @@ def load_caption_model():
     if settings.DEVICE == "cpu":
         caption_model = caption_model.float()
     caption_model.eval()
-    logger.info("Caption model loaded successfully")
+    logger.info("Local caption model loaded successfully")
 
 
 def _migrate_embedding_dimensions():
@@ -467,4 +478,6 @@ async def health():
         "vision_model_loaded": vision_model is not None,
         "text_model_loaded": text_model is not None,
         "caption_model_loaded": caption_model is not None,
+        "caption_provider": settings.CAPTION_PROVIDER,
+        "caption_model_name": settings.CAPTION_MODEL_NAME,
     }

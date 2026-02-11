@@ -86,58 +86,6 @@ def encode_frames_batch(frames, vision_model, preprocess, device):
     return features.cpu().float().numpy()
 
 
-def caption_frame(pil_image, caption_model, caption_processor, device):
-    """Generate a text caption for a single frame using Qwen3-VL.
-
-    Returns the caption string.
-    """
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "image", "image": pil_image},
-                {"type": "text", "text": settings.CAPTION_PROMPT},
-            ],
-        }
-    ]
-    text_input = caption_processor.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
-    inputs = caption_processor(
-        text=[text_input],
-        images=[pil_image],
-        padding=True,
-        return_tensors="pt",
-    )
-    if device != "cpu":
-        inputs = inputs.to(device)
-
-    with torch.no_grad():
-        output_ids = caption_model.generate(
-            **inputs,
-            max_new_tokens=settings.CAPTION_MAX_TOKENS,
-        )
-    # Decode only the generated tokens (skip input tokens)
-    generated = output_ids[0][inputs.input_ids.shape[1]:]
-    caption = caption_processor.decode(generated, skip_special_tokens=True).strip()
-    return caption
-
-
-def caption_frames_batch(all_frames, caption_model, caption_processor, device):
-    """Caption a list of (frame_num, timestamp_ms, pil_image) tuples.
-
-    Returns list of (frame_num, timestamp_ms, caption_text) tuples.
-    """
-    results = []
-    for frame_num, timestamp_ms, pil_img in all_frames:
-        try:
-            caption = caption_frame(pil_img, caption_model, caption_processor, device)
-            results.append((frame_num, timestamp_ms, caption))
-        except Exception as e:
-            logger.warning(f"Caption failed for frame {frame_num}: {e}")
-    return results
-
-
 def transcribe_video(video_path: str):
     """Transcribe video audio using Whisper.
 
@@ -274,14 +222,17 @@ def index_video(video_id: str, object_name: str, db: Session):
         db.commit()
         logger.info(f"Indexed {frame_count} frames for {video_id}")
 
-        # 2b. Caption frames with Qwen3-VL and embed captions with text model
-        if bridge_main.caption_model is not None:
-            logger.info(f"Captioning {len(all_frames)} frames for {video_id}")
+        # 2b. Caption frames and embed captions with text model
+        if settings.CAPTION_ENABLED:
+            from indexing.captioning import caption_frames_batch
+
+            logger.info(f"Captioning {len(all_frames)} frames for {video_id} "
+                        f"(provider={settings.CAPTION_PROVIDER})")
             captions = caption_frames_batch(
                 all_frames,
-                bridge_main.caption_model,
-                bridge_main.caption_processor,
-                device,
+                caption_model=bridge_main.caption_model,
+                caption_processor=bridge_main.caption_processor,
+                device=device,
             )
             if captions:
                 caption_texts = [c[2] for c in captions]

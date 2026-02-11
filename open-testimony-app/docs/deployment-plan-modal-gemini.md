@@ -1,5 +1,10 @@
 # Deployment Plan: Modal + Gemini API Captioning
 
+> **Updated Feb 2026** — Gemini Batch API evaluated and rejected for real-time
+> indexing (24hr turnaround). Standard Gemini API recommended. Gemini 3 Flash
+> available but Gemini 2.0 Flash is the best default (cheapest, quality is
+> sufficient). See "Gemini Model Comparison" section below.
+
 ## Current Architecture (Local)
 
 ```
@@ -56,9 +61,10 @@ By replacing local Qwen3-VL captioning with a Gemini API call, we eliminate
 └────────────────────────────────────────────────────┘
                    │
                    ▼ caption requests
-┌─ Gemini 2.0 Flash API ───────────────────────────┐
-│ ~$0.00016 per frame caption                        │
-│ ~$0.009 per 56-frame video                         │
+┌─ Gemini API (configurable model) ────────────────┐
+│ gemini-2.0-flash:        ~$0.005 per 56-frame vid │
+│ gemini-3-flash-preview:  ~$0.032 per 56-frame vid │
+│ (both negligible at ~50 videos/month)              │
 └───────────────────────────────────────────────────┘
 ```
 
@@ -98,7 +104,7 @@ Instead of hardcoding Gemini, make the caption provider configurable:
 # bridge/config.py
 CAPTION_PROVIDER: str = "gemini"  # "gemini" | "openai" | "anthropic" | "local"
 CAPTION_API_KEY: str = ""
-CAPTION_MODEL_NAME: str = "gemini-2.0-flash"  # or "gpt-4o", "claude-sonnet-4-5-20250929", "Qwen/Qwen3-VL-8B-Instruct"
+CAPTION_MODEL_NAME: str = "gemini-2.0-flash"  # or "gemini-3-flash-preview", "gpt-4o", "claude-sonnet-4-5-20250929", "Qwen/Qwen3-VL-8B-Instruct"
 CAPTION_ENDPOINT: str = ""  # optional custom endpoint
 CAPTION_MAX_TOKENS: int = 256
 ```
@@ -290,3 +296,82 @@ For local development with Modal:
 | Qwen3-Embedding-8B | ~16 GB |
 | Whisper large-v3 | ~3 GB |
 | **Total** | **~36.5 GB** — needs A100 |
+
+---
+
+## Gemini Batch API Analysis
+
+### Batch API Mechanics
+- Upload JSONL file with requests (or inline for small batches)
+- Each request can include image data (base64 `inline_data` or Files API `file_uri`)
+- Async processing — poll `client.batches.get()` for completion
+- 50% cost reduction vs standard API
+- **Target turnaround: 24 hours** (often faster, but no SLA)
+- Jobs expire after 48 hours if still pending/running
+
+### Verdict: Batch API is NOT suitable for real-time indexing
+
+When a user uploads a video and expects it searchable within minutes, a 24-hour
+turnaround is unacceptable. The batch queue time is unpredictable — could be
+minutes or hours depending on Google's load. No partial results are returned;
+you get everything when the job completes.
+
+**Where Batch API makes sense:**
+- Bulk re-indexing (change prompt or model, re-caption entire library overnight)
+- Nightly enrichment jobs
+- Backfill when migrating from local Qwen3-VL to Gemini captions
+
+**Recommendation:** Use the standard (synchronous) Gemini API for real-time
+captioning. The cost difference is negligible at our scale. Batch can be
+added later as an optional re-indexing mode.
+
+---
+
+## Gemini Model Comparison for Image Captioning
+
+### Pricing (per 1M tokens)
+
+| Model | Input | Output | Batch Input | Batch Output |
+|-------|-------|--------|-------------|--------------|
+| **Gemini 2.0 Flash** | $0.10 | $0.40 | $0.05 | $0.20 |
+| **Gemini 2.5 Flash** | $0.30 | $2.50 | $0.15 | $1.25 |
+| **Gemini 3 Flash** | $0.50 | $3.00 | $0.25 | $1.50 |
+
+### Per-frame captioning cost estimate
+
+Assumptions: ~536 input tokens per frame (image tiles + prompt), ~100 output tokens.
+
+| Model | Cost per frame | Cost per 56-frame video | 50 videos/month |
+|-------|---------------|-------------------------|-----------------|
+| Gemini 2.0 Flash | $0.000094 | $0.005 | $0.26 |
+| Gemini 3 Flash | $0.000568 | $0.032 | $1.59 |
+
+**Bottom line:** All Gemini Flash models are extraordinarily cheap for this use
+case. Even Gemini 3 Flash costs ~$1.59/month for 50 videos. The price
+difference between models is negligible — **choose based on caption quality,
+not cost.**
+
+### Recommendation
+
+- **Default: `gemini-2.0-flash`** — cheapest, well-proven for image description
+- **Optional: `gemini-3-flash-preview`** — higher quality, 5-6x more expensive
+  but still under $2/month at our scale
+- **Configurable:** Let the user set `CAPTION_MODEL_NAME` to try either
+- **Local fallback:** `CAPTION_PROVIDER=local` keeps Qwen3-VL for offline/GPU dev
+
+### SDK
+
+```bash
+pip install google-genai
+```
+
+```python
+from google import genai
+
+client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+response = client.models.generate_content(
+    model="gemini-2.0-flash",  # or "gemini-3-flash-preview"
+    contents=[prompt, pil_image],
+)
+caption = response.text
+```

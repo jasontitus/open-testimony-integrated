@@ -35,6 +35,13 @@ fi
 # --- Create local data directories ---
 mkdir -p "$DATA_DIR/temp" "$DATA_DIR/thumbnails"
 
+# --- Load secrets from .env (gitignored) ---
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
 # --- Environment variables ---
 # Database and MinIO on localhost (exposed by Docker)
 export DATABASE_URL="postgresql://user:pass@localhost:5432/opentestimony"
@@ -53,8 +60,11 @@ export TRANSCRIPT_MODEL_NAME="Qwen/Qwen3-Embedding-8B"
 export TRANSCRIPT_EMBEDDING_DIM="4096"
 export WHISPER_MODEL="large-v3"
 
-# Caption model (Qwen3-VL for frame descriptions)
-export CAPTION_MODEL_NAME="Qwen/Qwen3-VL-8B-Instruct"
+# Caption provider: "gemini" for Gemini API, "local" for Qwen3-VL
+export CAPTION_PROVIDER="gemini"
+export GEMINI_API_KEY="${GEMINI_API_KEY:-}"  # Set in bridge/.env
+
+export CAPTION_MODEL_NAME="gemini-3-flash-preview"  # or "gemini-2.0-flash" or "Qwen/Qwen3-VL-8B-Instruct" for local
 export CAPTION_ENABLED="true"
 export CAPTION_MAX_TOKENS="256"
 export CAPTION_BATCH_SIZE="1"

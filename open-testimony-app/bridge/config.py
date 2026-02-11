@@ -31,9 +31,11 @@ class Settings:
     )
     VISION_EMBEDDING_DIM: int = int(os.environ.get("VISION_EMBEDDING_DIM", "1152"))
 
-    # Caption model (Qwen3-VL for frame description generation)
+    # Caption provider: "gemini" for Gemini API, "local" for Qwen3-VL
+    CAPTION_PROVIDER: str = os.environ.get("CAPTION_PROVIDER", "gemini")
+    GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
     CAPTION_MODEL_NAME: str = os.environ.get(
-        "CAPTION_MODEL_NAME", "Qwen/Qwen3-VL-8B-Instruct"
+        "CAPTION_MODEL_NAME", "gemini-3-flash-preview"
     )
     CAPTION_ENABLED: bool = os.environ.get("CAPTION_ENABLED", "true").lower() == "true"
     CAPTION_MAX_TOKENS: int = int(os.environ.get("CAPTION_MAX_TOKENS", "256"))
