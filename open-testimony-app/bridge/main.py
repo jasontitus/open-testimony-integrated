@@ -58,17 +58,17 @@ def load_vision_model():
         vision_model = model
         vision_preprocess = preprocess
     else:
-        # PE-Core model via VideoIndexer's code (mounted at /opt/video-indexer/src)
-        from core.vision_encoder.pe_no_einops_final_verified import CLIP
-        from core.vision_encoder.transforms import get_image_transform
+        # PE-Core model via official perception_models package
+        import core.vision_encoder.pe as pe
+        import core.vision_encoder.transforms as pe_transforms
 
-        model = CLIP.from_config(settings.VISION_MODEL_NAME, pretrained=True)
+        model = pe.CLIP.from_config(settings.VISION_MODEL_NAME, pretrained=True)
         model = model.to(device)
         if settings.USE_FP16:
             model = model.half()
         model.eval()
         vision_model = model
-        vision_preprocess = get_image_transform(model.image_size)
+        vision_preprocess = pe_transforms.get_image_transform(model.image_size)
 
     logger.info("Vision model loaded successfully")
 

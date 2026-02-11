@@ -14,8 +14,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# VideoIndexer source is mounted read-only at /opt/video-indexer/src
-ENV PYTHONPATH="/opt/video-indexer/src:${PYTHONPATH}"
+# Install PE-Core (perception_models) from source for vision encoding
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && git clone --depth 1 https://github.com/facebookresearch/perception_models.git /opt/perception_models \
+    && pip install --no-cache-dir -e /opt/perception_models \
+    && apt-get purge -y git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 8003
 

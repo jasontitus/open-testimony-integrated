@@ -29,11 +29,12 @@ def encode_text_query(query: str, vision_model, device) -> list[float]:
         return text_features.cpu().float().numpy()[0].tolist()
     else:
         # PE-Core text encoding
-        from core.vision_encoder.tokenizer import tokenize
+        import core.vision_encoder.transforms as pe_transforms
 
-        tokens = tokenize([query]).to(device)
+        tokenizer = pe_transforms.get_text_tokenizer(vision_model.context_length)
+        tokens = tokenizer([query]).to(device)
         with torch.no_grad():
-            _, text_features, _ = vision_model(None, tokens)
+            text_features = vision_model.encode_text(tokens)
             text_features = torch.nn.functional.normalize(text_features, dim=-1)
         return text_features.cpu().float().numpy()[0].tolist()
 
@@ -52,7 +53,7 @@ def encode_image_query(
         if settings.VISION_MODEL_FAMILY == "open_clip":
             features = vision_model.encode_image(tensor)
         else:
-            features, _, _ = vision_model(tensor, None)
+            features = vision_model.encode_image(tensor)
         features = torch.nn.functional.normalize(features, dim=-1)
 
     return features.cpu().float().numpy()[0].tolist()

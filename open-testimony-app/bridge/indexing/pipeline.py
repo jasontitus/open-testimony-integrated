@@ -80,7 +80,7 @@ def encode_frames_batch(frames, vision_model, preprocess, device):
             features = vision_model.encode_image(tensors)
             features = torch.nn.functional.normalize(features, dim=-1)
         else:
-            features, _, _ = vision_model(tensors, None)
+            features = vision_model.encode_image(tensors)
             features = torch.nn.functional.normalize(features, dim=-1)
 
     return features.cpu().float().numpy()

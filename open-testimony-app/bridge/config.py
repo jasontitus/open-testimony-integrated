@@ -22,6 +22,8 @@ class Settings:
     JWT_ALGORITHM: str = "HS256"
 
     # Vision model
+    # open_clip: "ViT-L-14", "ViT-B-32", etc.
+    # pe_core: "PE-Core-L14-336", "PE-Core-B16-224", "PE-Core-G14-448"
     VISION_MODEL_FAMILY: str = os.environ.get("VISION_MODEL_FAMILY", "open_clip")
     VISION_MODEL_NAME: str = os.environ.get("VISION_MODEL_NAME", "ViT-L-14")
     VISION_MODEL_PRETRAINED: str = os.environ.get(
