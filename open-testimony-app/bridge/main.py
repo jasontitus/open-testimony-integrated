@@ -24,6 +24,7 @@ SessionLocal = sessionmaker(bind=engine)
 # Global model holders (loaded at startup)
 vision_model = None
 vision_preprocess = None
+vision_tokenizer = None  # callable: list[str] -> Tensor of input_ids
 text_model = None
 caption_model = None
 caption_processor = None
@@ -39,7 +40,7 @@ def get_db():
 
 def load_vision_model():
     """Load the vision model (OpenCLIP or PE-Core) into memory."""
-    global vision_model, vision_preprocess
+    global vision_model, vision_preprocess, vision_tokenizer
     import torch
 
     device = torch.device(settings.DEVICE)
@@ -59,6 +60,22 @@ def load_vision_model():
         model.eval()
         vision_model = model
         vision_preprocess = preprocess
+
+        # Cache tokenizer — use underlying HF tokenizer directly to avoid
+        # open_clip HFTokenizer.batch_encode_plus incompatibility with transformers 5.x
+        oc_tok = open_clip.get_tokenizer(settings.VISION_MODEL_NAME)
+        if hasattr(oc_tok, 'tokenizer'):
+            hf_tok = oc_tok.tokenizer
+            ctx_len = oc_tok.context_length
+            def _tokenize(texts):
+                return hf_tok(
+                    texts, return_tensors="pt",
+                    max_length=ctx_len, padding="max_length", truncation=True,
+                ).input_ids
+            vision_tokenizer = _tokenize
+            logger.info(f"Using HF tokenizer directly (context_length={ctx_len})")
+        else:
+            vision_tokenizer = oc_tok
     else:
         # PE-Core model via official perception_models package
         import core.vision_encoder.pe as pe

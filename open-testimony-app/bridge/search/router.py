@@ -200,11 +200,17 @@ async def combined_search(
     caption_results = search_captions(caption_embedding, db, limit)
     t_caption = time.time()
 
-    # Tag results with source
-    for r in visual_results:
+    # Tag results with source and assign RRF rank scores.
+    # Raw scores from SigLIP (~0.1-0.3) and Qwen3-Embedding (~0.4-0.6) are on
+    # different scales, so we use Reciprocal Rank Fusion (k=60) to combine them
+    # fairly based on rank position rather than raw similarity.
+    RRF_K = 60
+    for rank, r in enumerate(visual_results):
         r["source"] = "visual"
-    for r in caption_results:
+        r["rrf_score"] = 1.0 / (RRF_K + rank + 1)
+    for rank, r in enumerate(caption_results):
         r["source"] = "caption"
+        r["rrf_score"] = 1.0 / (RRF_K + rank + 1)
 
     # Merge and deduplicate by (video_id, frame_num)
     merged = {}
@@ -216,18 +222,21 @@ async def combined_search(
         key = (r["video_id"], r.get("frame_num"))
         if key in merged:
             existing = merged[key]
-            # Keep the higher score as primary, record both
+            # Same frame in both indexes — sum RRF scores, keep both raw scores
+            existing["rrf_score"] += r["rrf_score"]
             existing["caption_score"] = r["score"]
             existing["caption_text"] = r.get("caption_text")
-            if r["score"] > existing["score"]:
-                existing["score"] = r["score"]
-                existing["source"] = "caption"
-            existing["visual_score"] = existing.get("visual_score", existing["score"])
+            existing["source"] = "both"
         else:
             merged[key] = {**r, "visual_score": None, "caption_score": r["score"]}
 
-    # Sort by best score descending, take top N
-    results = sorted(merged.values(), key=lambda x: x["score"], reverse=True)[:limit]
+    # Sort by RRF score descending, take top N
+    results = sorted(merged.values(), key=lambda x: x["rrf_score"], reverse=True)[:limit]
+
+    # Set display score to RRF score (normalized to 0-1 range for UI)
+    max_rrf = results[0]["rrf_score"] if results else 1.0
+    for r in results:
+        r["score"] = r["rrf_score"] / max_rrf  # normalize so best = 1.0
 
     t_end = time.time()
     logger.info(

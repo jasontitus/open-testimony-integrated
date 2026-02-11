@@ -23,7 +23,7 @@ const aiApi = axios.create({
 // --- Inline component: collapsible group of results for one video ---
 function VideoResultGroup({
   group, mode, onResultClick, onVideoClick, availableTags, tagCounts, onVideoTagsChanged,
-  canEdit, selectMode, selectedResults, onToggleSelect, isResultSelected,
+  canEdit, selectMode, selectedResults, onToggleSelect, isResultSelected, searchTiming,
 }) {
   const [expanded, setExpanded] = useState(false);
   const best = group.results[0];
@@ -114,9 +114,11 @@ function VideoResultGroup({
               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium shrink-0 ${
                 bestSource === 'visual'
                   ? 'bg-purple-900/30 border border-purple-500/30 text-purple-300'
-                  : 'bg-teal-900/30 border border-teal-500/30 text-teal-300'
+                  : bestSource === 'both'
+                    ? 'bg-blue-900/30 border border-blue-500/30 text-blue-300'
+                    : 'bg-teal-900/30 border border-teal-500/30 text-teal-300'
               }`}>
-                {bestSource === 'visual' ? 'Visual' : 'Caption'}
+                {bestSource === 'visual' ? 'Visual' : bestSource === 'both' ? 'Both' : 'Caption'}
               </span>
             )}
           </div>
@@ -193,7 +195,7 @@ function VideoResultGroup({
 }
 
 export default function AISearchPanel({ onResultClick, availableTags, tagCounts, onVideoTagsChanged }) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [mode, setMode] = useState('visual_text');
   const [query, setQuery] = useState('');
   const [imageFile, setImageFile] = useState(null);
@@ -310,7 +312,16 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
         category: detailMap[r.video_id]?.category || null,
       })));
     } catch (err) {
-      setError(err.response?.data?.detail || 'Search failed. Is the bridge service running?');
+      if (err.response?.status === 401) {
+        logout();
+        return;
+      }
+      const detail = err.response?.data?.detail;
+      if (err.response?.status === 502 || err.response?.status === 504 || !err.response) {
+        setError('Cannot reach the AI search service. Is the bridge running?');
+      } else {
+        setError(detail || `Search failed (${err.response?.status || 'network error'}).`);
+      }
     } finally {
       setLoading(false);
     }
@@ -714,6 +725,7 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
                     selectedResults={selectedResults}
                     onToggleSelect={toggleSelectResult}
                     isResultSelected={isResultSelected}
+                    searchTiming={searchTiming}
                   />
                 ))}
               </div>

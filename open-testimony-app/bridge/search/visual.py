@@ -18,11 +18,10 @@ def encode_text_query(query: str, vision_model, device) -> list[float]:
 
     Returns a normalized embedding vector.
     """
-    import open_clip
-
     if settings.VISION_MODEL_FAMILY == "open_clip":
-        tokenizer = open_clip.get_tokenizer(settings.VISION_MODEL_NAME)
-        tokens = tokenizer([query]).to(device)
+        from main import vision_tokenizer
+
+        tokens = vision_tokenizer([query]).to(device)
         with torch.no_grad():
             text_features = vision_model.encode_text(tokens)
             text_features = torch.nn.functional.normalize(text_features, dim=-1)

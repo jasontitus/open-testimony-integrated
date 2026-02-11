@@ -124,9 +124,11 @@ export default function AISearchResultCard({
                 <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
                   result.source === 'visual'
                     ? 'bg-purple-900/30 border border-purple-500/30 text-purple-300'
-                    : 'bg-teal-900/30 border border-teal-500/30 text-teal-300'
+                    : result.source === 'both'
+                      ? 'bg-blue-900/30 border border-blue-500/30 text-blue-300'
+                      : 'bg-teal-900/30 border border-teal-500/30 text-teal-300'
                 }`}>
-                  {result.source === 'visual' ? 'Visual' : 'Caption'}
+                  {result.source === 'visual' ? 'Visual' : result.source === 'both' ? 'Both' : 'Caption'}
                 </span>
               )}
             </div>
@@ -207,14 +209,41 @@ export default function AISearchResultCard({
       {showDiagnostic && (
         <div className="bg-gray-900 border border-gray-600 rounded-lg p-3 mx-2 mb-2 space-y-1.5 text-xs">
           <p className="text-[10px] text-gray-500 uppercase font-bold">Diagnostic Info</p>
-          {result.source && (
-            <div className="flex justify-between">
-              <span className="text-gray-500">Source</span>
-              <span className={result.source === 'visual' ? 'text-purple-300' : 'text-teal-300'}>
-                {result.source}
-              </span>
-            </div>
-          )}
+          {/* Source — always shown, derived from mode or result.source */}
+          <div className="flex justify-between">
+            <span className="text-gray-500">Source</span>
+            <span className={
+              (result.source === 'visual' || mode === 'visual_text' || mode === 'visual_image')
+                ? 'text-purple-300'
+                : result.source === 'both'
+                  ? 'text-blue-300'
+                  : (result.source === 'caption' || mode === 'caption_semantic')
+                    ? 'text-teal-300'
+                    : 'text-green-300'
+            }>
+              {result.source === 'visual' ? 'Visual (SigLIP)'
+                : result.source === 'caption' ? 'Caption (Qwen3-VL)'
+                : result.source === 'both' ? 'Both (SigLIP + Qwen3-VL)'
+                : mode === 'visual_text' || mode === 'visual_image'
+                  ? 'Visual (SigLIP)'
+                  : mode === 'caption_semantic'
+                    ? 'Caption (Qwen3-VL)'
+                    : 'Transcript (Qwen3-Embedding)'
+              }
+            </span>
+          </div>
+          {/* Model — show which embedding model was used */}
+          <div className="flex justify-between">
+            <span className="text-gray-500">Model</span>
+            <span className="text-gray-300 font-mono text-[10px]">
+              {(result.source === 'both' || mode === 'combined')
+                ? 'SigLIP + Qwen3-Embedding'
+                : (result.source === 'visual' || mode === 'visual_text' || mode === 'visual_image')
+                  ? 'SigLIP SO400M-14'
+                  : 'Qwen3-Embedding-8B'
+              }
+            </span>
+          </div>
           {score != null && (
             <div className="flex justify-between">
               <span className="text-gray-500">Score</span>
@@ -223,13 +252,13 @@ export default function AISearchResultCard({
           )}
           {result.visual_score != null && (
             <div className="flex justify-between">
-              <span className="text-gray-500">Visual score</span>
+              <span className="text-gray-500">Visual score (SigLIP)</span>
               <span className="text-purple-300 font-mono">{result.visual_score.toFixed(4)}</span>
             </div>
           )}
           {result.caption_score != null && (
             <div className="flex justify-between">
-              <span className="text-gray-500">Caption score</span>
+              <span className="text-gray-500">Caption score (Qwen3-VL)</span>
               <span className="text-teal-300 font-mono">{result.caption_score.toFixed(4)}</span>
             </div>
           )}
