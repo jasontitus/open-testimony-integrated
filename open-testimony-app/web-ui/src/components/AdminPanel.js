@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
-import { UserPlus, Key, Shield, AlertCircle, Tag, Trash2, RefreshCw, Database } from 'lucide-react';
+import { UserPlus, Key, Shield, AlertCircle, Tag, Trash2, RefreshCw, Database, Upload, CheckCircle, XCircle, FileVideo, Image } from 'lucide-react';
 import axios from 'axios';
 import api from '../api';
 
@@ -71,6 +71,9 @@ export default function AdminPanel() {
             </table>
           </div>
         )}
+
+        {/* Bulk Upload */}
+        <BulkUpload />
 
         {/* Tag Management */}
         <TagManagement />
@@ -275,6 +278,200 @@ function CreateUserForm({ onCreated }) {
         </button>
       </div>
     </form>
+  );
+}
+
+function BulkUpload() {
+  const [files, setFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [results, setResults] = useState(null);
+
+  const fileInputRef = React.useRef(null);
+
+  const handleFilesSelected = (e) => {
+    const selected = Array.from(e.target.files || []);
+    setFiles(selected);
+    setResults(null);
+  };
+
+  const removeFile = (index) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleUpload = async () => {
+    if (files.length === 0) return;
+    setUploading(true);
+    setProgress(0);
+    setResults(null);
+
+    const formData = new FormData();
+    files.forEach(f => formData.append('files', f));
+
+    try {
+      const res = await api.post('/bulk-upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (e) => {
+          if (e.total) setProgress(Math.round((e.loaded / e.total) * 100));
+        },
+      });
+      setResults(res.data);
+      setFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } catch (err) {
+      setResults({
+        status: 'error',
+        total: files.length,
+        succeeded: 0,
+        failed: files.length,
+        results: [{ filename: 'Upload failed', status: 'error', detail: err.response?.data?.detail || err.message }],
+      });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+  const formatSize = (bytes) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  };
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center gap-2 mb-4">
+        <Upload size={20} className="text-green-400" />
+        <h2 className="text-xl font-bold text-white">Bulk Upload</h2>
+        <span className="text-xs text-gray-500 ml-2">Videos &amp; Photos</span>
+      </div>
+
+      <div className="bg-gray-800 rounded-xl border border-gray-700 p-5">
+        {/* Drop zone / file picker */}
+        <div
+          className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center cursor-pointer hover:border-green-500/50 transition"
+          onClick={() => fileInputRef.current?.click()}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            const dropped = Array.from(e.dataTransfer.files);
+            setFiles(prev => [...prev, ...dropped]);
+            setResults(null);
+          }}
+        >
+          <Upload size={32} className="mx-auto text-gray-500 mb-3" />
+          <p className="text-sm text-gray-400">Click or drag files here to add videos and photos</p>
+          <p className="text-xs text-gray-600 mt-1">All uploads will be marked as unverified. EXIF data will be imported when available.</p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="video/*,image/*"
+            onChange={handleFilesSelected}
+            className="hidden"
+          />
+        </div>
+
+        {/* File list */}
+        {files.length > 0 && (
+          <div className="mt-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-gray-400">{files.length} file{files.length !== 1 ? 's' : ''} selected ({formatSize(totalSize)})</span>
+              <button
+                onClick={() => { setFiles([]); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                className="text-xs text-gray-500 hover:text-white transition"
+              >
+                Clear all
+              </button>
+            </div>
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              {files.map((f, i) => (
+                <div key={i} className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 rounded-lg text-sm">
+                  {f.type.startsWith('video/') ? (
+                    <FileVideo size={14} className="text-blue-400 flex-shrink-0" />
+                  ) : (
+                    <Image size={14} className="text-green-400 flex-shrink-0" />
+                  )}
+                  <span className="text-gray-300 truncate flex-1">{f.name}</span>
+                  <span className="text-xs text-gray-600 flex-shrink-0">{formatSize(f.size)}</span>
+                  <button onClick={() => removeFile(i)} className="text-gray-600 hover:text-red-400 transition flex-shrink-0">
+                    <XCircle size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Upload button */}
+            <div className="flex items-center gap-3 mt-4">
+              <button
+                onClick={handleUpload}
+                disabled={uploading || files.length === 0}
+                className="flex items-center gap-1.5 px-5 py-2 bg-green-600 hover:bg-green-500 disabled:bg-green-800 text-white text-sm font-medium rounded-lg transition"
+              >
+                <Upload size={14} />
+                {uploading ? 'Uploading...' : `Upload ${files.length} File${files.length !== 1 ? 's' : ''}`}
+              </button>
+
+              {uploading && (
+                <div className="flex-1">
+                  <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-green-500 rounded-full transition-all duration-300"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-gray-500 mt-1">{progress}%</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Results */}
+        {results && (
+          <div className="mt-4">
+            <div className={`p-3 rounded-lg flex items-center gap-2 text-sm mb-3 ${
+              results.status === 'success'
+                ? 'bg-green-900/30 border border-green-500/50 text-green-400'
+                : results.status === 'partial'
+                ? 'bg-yellow-900/30 border border-yellow-500/50 text-yellow-400'
+                : 'bg-red-900/30 border border-red-500/50 text-red-400'
+            }`}>
+              {results.status === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
+              {results.succeeded} of {results.total} file{results.total !== 1 ? 's' : ''} uploaded successfully
+              {results.failed > 0 && `, ${results.failed} failed`}
+            </div>
+
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              {results.results.map((r, i) => (
+                <div key={i} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm ${
+                  r.status === 'success' ? 'bg-green-900/10' : 'bg-red-900/10'
+                }`}>
+                  {r.status === 'success' ? (
+                    <CheckCircle size={14} className="text-green-400 flex-shrink-0" />
+                  ) : (
+                    <XCircle size={14} className="text-red-400 flex-shrink-0" />
+                  )}
+                  <span className="text-gray-300 truncate flex-1">{r.filename}</span>
+                  {r.status === 'success' ? (
+                    <span className="text-xs text-gray-500 flex-shrink-0">
+                      {r.media_type} {r.has_exif ? '· EXIF' : ''} · unverified
+                    </span>
+                  ) : (
+                    <span className="text-xs text-red-400 flex-shrink-0 truncate max-w-[200px]">{r.detail}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <p className="text-[10px] text-gray-600 mt-3">
+          Bulk uploaded files are marked as unverified. EXIF metadata (GPS location, timestamp) is extracted automatically. All files are queued for AI indexing.
+        </p>
+      </div>
+    </div>
   );
 }
 

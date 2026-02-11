@@ -459,6 +459,241 @@ async def upload_video(
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
+def _extract_exif(file_bytes: bytes) -> dict:
+    """Extract EXIF metadata from an image file, returning a dict with
+    GPS coordinates (lat/lon) and datetime if available."""
+    result = {"lat": None, "lon": None, "datetime": None, "raw": None}
+    try:
+        from PIL import Image
+        from PIL.ExifTags import TAGS, GPSTAGS
+        img = Image.open(BytesIO(file_bytes))
+        exif_data = img.getexif()
+        if not exif_data:
+            return result
+
+        raw = {}
+        for tag_id, value in exif_data.items():
+            tag_name = TAGS.get(tag_id, str(tag_id))
+            # Skip binary / non-serialisable values
+            if isinstance(value, bytes):
+                continue
+            raw[tag_name] = str(value)
+
+        result["raw"] = raw
+
+        # DateTime
+        dt_str = exif_data.get(306)  # tag 306 = DateTime
+        if dt_str:
+            result["datetime"] = dt_str
+
+        # GPS info (IFD pointer tag 34853)
+        gps_ifd = exif_data.get_ifd(34853)
+        if gps_ifd:
+            def _dms_to_dd(dms, ref):
+                """Convert (degrees, minutes, seconds) + ref to decimal degrees."""
+                degrees = float(dms[0])
+                minutes = float(dms[1])
+                seconds = float(dms[2])
+                dd = degrees + minutes / 60 + seconds / 3600
+                if ref in ("S", "W"):
+                    dd = -dd
+                return dd
+
+            lat_data = gps_ifd.get(2)   # GPSLatitude
+            lat_ref = gps_ifd.get(1)    # GPSLatitudeRef
+            lon_data = gps_ifd.get(4)   # GPSLongitude
+            lon_ref = gps_ifd.get(3)    # GPSLongitudeRef
+
+            if lat_data and lat_ref:
+                result["lat"] = _dms_to_dd(lat_data, lat_ref)
+            if lon_data and lon_ref:
+                result["lon"] = _dms_to_dd(lon_data, lon_ref)
+
+    except Exception as e:
+        logger.warning(f"EXIF extraction failed (non-fatal): {e}")
+    return result
+
+
+def _detect_media_type(filename: str, content_type: str) -> str:
+    """Determine if a file is a video or photo based on name/content-type."""
+    ext = os.path.splitext(filename or "")[1].lower()
+    photo_exts = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".tiff", ".bmp", ".gif"}
+    if ext in photo_exts or (content_type and content_type.startswith("image/")):
+        return "photo"
+    return "video"
+
+
+@app.post("/bulk-upload")
+async def bulk_upload(
+    files: list[UploadFile] = File(...),
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin bulk-uploads multiple videos/photos.
+
+    All files are stored as 'unverified' with source='bulk-upload'.
+    EXIF data is extracted when available for GPS location and timestamps.
+    Each file is queued for AI indexing.
+    """
+    results = []
+    minio_client = get_minio_client()
+
+    for upload_file in files:
+        try:
+            # Read file contents and compute hash
+            CHUNK_SIZE = 8 * 1024 * 1024
+            sha256 = hashlib.sha256()
+            file_size = 0
+            file_bytes = bytearray()
+
+            while True:
+                chunk = await upload_file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                sha256.update(chunk)
+                file_bytes.extend(chunk)
+                file_size += len(chunk)
+
+            if file_size == 0:
+                results.append({
+                    "filename": upload_file.filename,
+                    "status": "error",
+                    "detail": "Empty file",
+                })
+                continue
+
+            file_hash = sha256.hexdigest()
+            media_type = _detect_media_type(upload_file.filename, upload_file.content_type)
+
+            # Extract EXIF from images (and attempt on video files too)
+            exif = _extract_exif(bytes(file_bytes))
+
+            # Determine location from EXIF or default to 0,0
+            latitude = exif["lat"] if exif["lat"] is not None else 0.0
+            longitude = exif["lon"] if exif["lon"] is not None else 0.0
+
+            # Determine timestamp from EXIF or use current time
+            if exif["datetime"]:
+                try:
+                    # EXIF datetime format: "YYYY:MM:DD HH:MM:SS"
+                    timestamp = datetime.strptime(exif["datetime"], "%Y:%m:%d %H:%M:%S")
+                except ValueError:
+                    timestamp = datetime.utcnow()
+            else:
+                timestamp = datetime.utcnow()
+
+            # Store in MinIO
+            folder = "photos" if media_type == "photo" else "videos"
+            object_name = f"{folder}/bulk/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{upload_file.filename}"
+            content_type = upload_file.content_type or (
+                "image/jpeg" if media_type == "photo" else "video/mp4"
+            )
+
+            file_stream = BytesIO(bytes(file_bytes))
+            await asyncio.to_thread(
+                minio_client.put_object,
+                bucket_name=settings.MINIO_BUCKET,
+                object_name=object_name,
+                data=file_stream,
+                length=file_size,
+                content_type=content_type,
+            )
+
+            # Build exif_metadata field for the record
+            exif_metadata = exif["raw"] if exif["raw"] else None
+
+            # Create database record — always 'unverified'
+            video_record = Video(
+                device_id="bulk-upload",
+                object_name=object_name,
+                file_hash=file_hash,
+                timestamp=timestamp,
+                latitude=latitude,
+                longitude=longitude,
+                incident_tags=[],
+                source="bulk-upload",
+                media_type=media_type,
+                exif_metadata=exif_metadata,
+                verification_status="unverified",
+                metadata_json={
+                    "source": "bulk-upload",
+                    "uploaded_by": admin.username,
+                    "original_filename": upload_file.filename,
+                    "exif_location": {"lat": latitude, "lon": longitude}
+                        if (exif["lat"] is not None)
+                        else None,
+                },
+                uploaded_at=datetime.utcnow(),
+            )
+            db.add(video_record)
+            db.commit()
+            db.refresh(video_record)
+
+            # Audit log
+            audit_service.log_event(
+                db, "bulk_upload",
+                {
+                    "file_hash": file_hash,
+                    "media_type": media_type,
+                    "original_filename": upload_file.filename,
+                    "verification_status": "unverified",
+                    "has_exif_location": exif["lat"] is not None,
+                },
+                video_id=str(video_record.id),
+                user_id=str(admin.id),
+            )
+            db.commit()
+
+            # Notify bridge for AI indexing (videos and photos)
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    await client.post(
+                        f"{os.environ.get('BRIDGE_URL', 'http://bridge:8003')}/hooks/video-uploaded",
+                        json={
+                            "video_id": str(video_record.id),
+                            "object_name": object_name,
+                        },
+                    )
+                logger.info(f"Bridge notified for bulk-uploaded {media_type} {video_record.id}")
+            except Exception as e:
+                logger.warning(f"Bridge notification failed (non-fatal): {e}")
+
+            results.append({
+                "filename": upload_file.filename,
+                "status": "success",
+                "video_id": str(video_record.id),
+                "media_type": media_type,
+                "verification_status": "unverified",
+                "has_exif": exif["raw"] is not None,
+                "location": {"lat": latitude, "lon": longitude},
+            })
+
+            logger.info(
+                f"Bulk upload: {upload_file.filename} -> {video_record.id} "
+                f"({media_type}, exif={'yes' if exif['raw'] else 'no'})"
+            )
+
+        except Exception as e:
+            logger.error(f"Bulk upload error for {upload_file.filename}: {e}", exc_info=True)
+            results.append({
+                "filename": upload_file.filename,
+                "status": "error",
+                "detail": str(e),
+            })
+
+    succeeded = sum(1 for r in results if r["status"] == "success")
+    failed = sum(1 for r in results if r["status"] == "error")
+
+    return {
+        "status": "success" if failed == 0 else "partial" if succeeded > 0 else "error",
+        "total": len(results),
+        "succeeded": succeeded,
+        "failed": failed,
+        "results": results,
+    }
+
+
 @app.get("/videos")
 async def list_videos(
     device_id: Optional[str] = None,
