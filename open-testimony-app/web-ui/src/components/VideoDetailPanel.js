@@ -10,7 +10,7 @@ import TagInput from './TagInput';
 
 const CATEGORIES = ['', 'interview', 'incident', 'documentation', 'other'];
 
-export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated, initialTimestampMs }) {
+export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated, initialTimestampMs, availableTags: availableTagsProp }) {
   const { user } = useAuth();
   const [detail, setDetail] = useState(null);
   const [videoUrl, setVideoUrl] = useState(null);
@@ -25,7 +25,8 @@ export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated
   const [locationDescription, setLocationDescription] = useState('');
   const [notes, setNotes] = useState('');
   const [tags, setTags] = useState([]);
-  const [availableTags, setAvailableTags] = useState([]);
+  const [localAvailableTags, setLocalAvailableTags] = useState([]);
+  const availableTags = (availableTagsProp && availableTagsProp.length > 0) ? availableTagsProp : localAvailableTags;
 
   const canEdit = user?.role === 'admin' || user?.role === 'staff';
 
@@ -52,8 +53,10 @@ export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated
   }, [video?.id, syncFields]);
 
   useEffect(() => {
-    api.get('/tags').then(res => setAvailableTags(res.data.all_tags || [])).catch(() => {});
-  }, []);
+    if (!availableTagsProp || availableTagsProp.length === 0) {
+      api.get('/tags').then(res => setLocalAvailableTags(res.data.all_tags || [])).catch(() => {});
+    }
+  }, [availableTagsProp]);
 
   // Seek to initialTimestampMs when the video is ready
   useEffect(() => {
