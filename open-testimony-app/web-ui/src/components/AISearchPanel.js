@@ -1,8 +1,10 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Search, Upload, Film, MessageSquare, Loader, X } from 'lucide-react';
+import { Search, Upload, Film, MessageSquare, Loader, X, CheckSquare, Tag } from 'lucide-react';
 import axios from 'axios';
 import api from '../api';
+import { useAuth } from '../auth';
 import AISearchResultCard from './AISearchResultCard';
+import QuickTagMenu from './QuickTagMenu';
 
 const SEARCH_MODES = [
   { id: 'visual_text', label: 'Visual (Text)', icon: Film, description: 'Describe what you see' },
@@ -16,7 +18,8 @@ const aiApi = axios.create({
   withCredentials: true,
 });
 
-export default function AISearchPanel({ onResultClick }) {
+export default function AISearchPanel({ onResultClick, availableTags, tagCounts, onVideoTagsChanged }) {
+  const { user } = useAuth();
   const [mode, setMode] = useState('visual_text');
   const [query, setQuery] = useState('');
   const [imageFile, setImageFile] = useState(null);
@@ -30,6 +33,12 @@ export default function AISearchPanel({ onResultClick }) {
   const [videoUrl, setVideoUrl] = useState(null);
   const [videoLoading, setVideoLoading] = useState(false);
   const videoRef = useRef(null);
+
+  // Bulk selection state
+  const canEdit = user?.role === 'admin' || user?.role === 'staff';
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedResults, setSelectedResults] = useState([]); // array of result objects
+  const [showBulkTagMenu, setShowBulkTagMenu] = useState(false);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -52,6 +61,7 @@ export default function AISearchPanel({ onResultClick }) {
     setResults([]);
     setActiveResult(null);
     setVideoUrl(null);
+    setSelectedResults([]);
 
     try {
       let res;
@@ -66,7 +76,24 @@ export default function AISearchPanel({ onResultClick }) {
       } else if (mode === 'transcript_exact') {
         res = await aiApi.get('/search/transcript/exact', { params: { q: query, limit: 20 } });
       }
-      setResults(res.data.results || []);
+      const rawResults = res.data.results || [];
+      setResults(rawResults);
+
+      // Enrich results with existing tags from the API
+      const uniqueIds = [...new Set(rawResults.map(r => r.video_id))];
+      const tagMap = {};
+      await Promise.all(uniqueIds.map(async (id) => {
+        try {
+          const vRes = await api.get(`/videos/${id}`);
+          tagMap[id] = vRes.data.incident_tags || [];
+        } catch {
+          tagMap[id] = [];
+        }
+      }));
+      setResults(prev => prev.map(r => ({
+        ...r,
+        incident_tags: tagMap[r.video_id] || [],
+      })));
     } catch (err) {
       setError(err.response?.data?.detail || 'Search failed. Is the bridge service running?');
     } finally {
@@ -76,6 +103,7 @@ export default function AISearchPanel({ onResultClick }) {
 
   // When a result is clicked, open inline player
   const handleResultClick = async (result) => {
+    if (selectMode) return; // In select mode, clicks toggle selection
     setActiveResult(result);
     setVideoUrl(null);
     setVideoLoading(true);
@@ -106,6 +134,28 @@ export default function AISearchPanel({ onResultClick }) {
     }
   }, [activeResult, videoUrl]);
 
+  // Bulk selection helpers
+  const toggleSelectResult = (result) => {
+    setSelectedResults(prev => {
+      const exists = prev.find(r => r.video_id === result.video_id);
+      if (exists) return prev.filter(r => r.video_id !== result.video_id);
+      return [...prev, result];
+    });
+  };
+
+  const isResultSelected = (result) => {
+    return selectedResults.some(r => r.video_id === result.video_id);
+  };
+
+  // Deduplicated video IDs for bulk tagging
+  const selectedVideoIds = [...new Set(selectedResults.map(r => r.video_id))];
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedResults([]);
+    setShowBulkTagMenu(false);
+  };
+
   return (
     <div className="h-full flex flex-col bg-gray-900 w-full">
       {/* Search mode selector + form */}
@@ -116,7 +166,7 @@ export default function AISearchPanel({ onResultClick }) {
             return (
               <button
                 key={m.id}
-                onClick={() => { setMode(m.id); setResults([]); setError(''); setActiveResult(null); }}
+                onClick={() => { setMode(m.id); setResults([]); setError(''); setActiveResult(null); setSelectedResults([]); }}
                 className={`flex flex-col items-center gap-1 px-3 py-2 rounded-lg border text-xs transition ${
                   mode === m.id
                     ? 'bg-blue-600 border-blue-500 text-white'
@@ -179,7 +229,7 @@ export default function AISearchPanel({ onResultClick }) {
       {/* Main content: player + results */}
       <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
         {/* Inline video player (shown when a result is clicked) */}
-        {activeResult && (
+        {activeResult && !selectMode && (
           <div className="md:w-1/2 lg:w-3/5 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-gray-700">
             <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
               <span className="text-xs text-gray-400 font-mono">
@@ -217,7 +267,7 @@ export default function AISearchPanel({ onResultClick }) {
         )}
 
         {/* Results list */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4 relative">
           {error && (
             <div className="p-3 bg-red-900/30 border border-red-500/50 rounded-lg text-sm text-red-400 mb-4">
               {error}
@@ -239,18 +289,74 @@ export default function AISearchPanel({ onResultClick }) {
 
           {results.length > 0 && (
             <>
-              <p className="text-xs text-gray-500 mb-3">{results.length} results</p>
-              <div className="space-y-2">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs text-gray-500">{results.length} results</p>
+                {canEdit && (
+                  <button
+                    onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition ${
+                      selectMode
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600'
+                    }`}
+                  >
+                    <CheckSquare size={12} />
+                    {selectMode ? 'Cancel' : 'Select'}
+                  </button>
+                )}
+              </div>
+              <div className="space-y-2 pb-16">
                 {results.map((result, i) => (
                   <AISearchResultCard
                     key={`${result.video_id}-${result.timestamp_ms || result.start_ms}-${i}`}
                     result={result}
                     mode={mode}
                     onClick={handleResultClick}
+                    availableTags={availableTags}
+                    tagCounts={tagCounts}
+                    onVideoTagsChanged={onVideoTagsChanged}
+                    selectable={selectMode}
+                    selected={isResultSelected(result)}
+                    onToggleSelect={toggleSelectResult}
                   />
                 ))}
               </div>
             </>
+          )}
+
+          {/* Bulk selection sticky bar */}
+          {selectMode && selectedResults.length > 0 && (
+            <div className="sticky bottom-0 left-0 right-0 bg-gray-800 border-t border-gray-600 rounded-t-lg p-3 flex items-center justify-between shadow-2xl">
+              <span className="text-sm text-gray-300">
+                {selectedVideoIds.length} video{selectedVideoIds.length !== 1 ? 's' : ''} selected
+              </span>
+              <div className="flex items-center gap-2 relative">
+                <button
+                  onClick={() => setShowBulkTagMenu(prev => !prev)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition"
+                >
+                  <Tag size={12} />
+                  Tag Selected
+                </button>
+                <button
+                  onClick={() => setSelectedResults([])}
+                  className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs font-medium rounded-lg transition"
+                >
+                  Clear
+                </button>
+                {showBulkTagMenu && (
+                  <div className="absolute bottom-full right-0 mb-2">
+                    <QuickTagMenu
+                      videoIds={selectedVideoIds}
+                      availableTags={availableTags || []}
+                      tagCounts={tagCounts}
+                      onClose={() => setShowBulkTagMenu(false)}
+                      onTagsChanged={onVideoTagsChanged}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </div>

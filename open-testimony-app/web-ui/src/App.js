@@ -60,15 +60,18 @@ function Dashboard() {
   const [filters, setFilters] = useState(emptyFilters);
   const [tagCounts, setTagCounts] = useState([]);
   const [categoryCounts, setCategoryCounts] = useState([]);
+  const [availableTags, setAvailableTags] = useState([]);
 
   const fetchCounts = useCallback(async () => {
     try {
-      const [tagRes, catRes] = await Promise.all([
+      const [tagRes, catRes, tagsRes] = await Promise.all([
         api.get('/tags/counts'),
         api.get('/categories/counts'),
+        api.get('/tags'),
       ]);
       setTagCounts(tagRes.data.tags);
       setCategoryCounts(catRes.data.categories);
+      setAvailableTags(tagsRes.data.all_tags || []);
     } catch (error) {
       console.error("Error fetching counts:", error);
     }
@@ -123,6 +126,13 @@ function Dashboard() {
     fetchCounts();
   };
 
+  const handleVideoTagsChanged = useCallback((videoId, newTags) => {
+    setVideos(prev => prev.map(v =>
+      v.id === videoId ? { ...v, incident_tags: newTags } : v
+    ));
+    fetchCounts();
+  }, [fetchCounts]);
+
   const handleTagClick = (tag) => {
     if (!filters.tags.includes(tag)) {
       handleFiltersChange({ ...filters, tags: [...filters.tags, tag] });
@@ -170,7 +180,12 @@ function Dashboard() {
         {showAdmin ? (
           <AdminPanel />
         ) : viewMode === 'ai-search' ? (
-          <AISearchPanel onResultClick={handleAISearchResultClick} />
+          <AISearchPanel
+            onResultClick={handleAISearchResultClick}
+            availableTags={availableTags}
+            tagCounts={tagCounts}
+            onVideoTagsChanged={handleVideoTagsChanged}
+          />
         ) : (
           <>
             {/* Sidebar */}
@@ -191,6 +206,9 @@ function Dashboard() {
                 onRefresh={() => fetchVideos()}
                 onTagClick={handleTagClick}
                 onCategoryClick={handleCategoryClick}
+                availableTags={availableTags}
+                tagCounts={tagCounts}
+                onVideoTagsChanged={handleVideoTagsChanged}
               />
             </div>
 
@@ -217,6 +235,7 @@ function Dashboard() {
                           onVideoDeleted={handleVideoDeleted}
                           onVideoUpdated={handleVideoUpdated}
                           initialTimestampMs={initialTimestampMs}
+                          availableTags={availableTags}
                         />
                       </div>
                     </div>
@@ -228,6 +247,7 @@ function Dashboard() {
                   onVideoDeleted={handleVideoDeleted}
                   onVideoUpdated={handleVideoUpdated}
                   initialTimestampMs={initialTimestampMs}
+                  availableTags={availableTags}
                 />
               )}
             </div>
