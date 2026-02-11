@@ -17,14 +17,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _publicKey;
   bool _isRegistered = false;
   String _cryptoDisplay = 'Loading...';
-  final _serverUrlController = TextEditingController(
-    text: UploadService.baseUrl,
-  );
+  String _selectedServer = UploadService.baseUrl;
+  bool _isOther = false;
+  final _customUrlController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _loadDeviceInfo();
+    // Check if current URL matches a preset
+    final match = serverPresets.any((p) => p.url == _selectedServer);
+    if (!match) {
+      _isOther = true;
+      _customUrlController.text = _selectedServer;
+    }
   }
 
   Future<void> _loadDeviceInfo() async {
@@ -204,15 +210,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: TextField(
-              controller: _serverUrlController,
+            child: DropdownButtonFormField<String>(
+              value: _isOther ? 'other' : _selectedServer,
               decoration: const InputDecoration(
-                labelText: 'Server URL',
-                hintText: 'http://your-server-ip/api',
+                labelText: 'Server',
                 border: OutlineInputBorder(),
               ),
+              items: [
+                ...serverPresets.map((p) => DropdownMenuItem(
+                  value: p.url,
+                  child: Text(p.label),
+                )),
+                const DropdownMenuItem(
+                  value: 'other',
+                  child: Text('Other...'),
+                ),
+              ],
+              onChanged: (value) async {
+                if (value == null) return;
+                final uploadService = context.read<UploadService>();
+                if (value == 'other') {
+                  setState(() { _isOther = true; });
+                } else {
+                  setState(() {
+                    _isOther = false;
+                    _selectedServer = value;
+                  });
+                  await uploadService.setServerUrl(value);
+                }
+              },
             ),
           ),
+          if (_isOther) ...[
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: TextField(
+                controller: _customUrlController,
+                decoration: const InputDecoration(
+                  labelText: 'Custom Server URL',
+                  hintText: 'http://192.168.1.100:18080/api',
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (value) async {
+                  if (value.trim().isEmpty) return;
+                  final uploadService = context.read<UploadService>();
+                  setState(() { _selectedServer = value.trim(); });
+                  await uploadService.setServerUrl(value.trim());
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Server URL saved'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+              child: Text(
+                'Press return to save',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
@@ -303,7 +366,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
-    _serverUrlController.dispose();
+    _customUrlController.dispose();
     super.dispose();
   }
 }

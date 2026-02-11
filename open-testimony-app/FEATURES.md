@@ -223,3 +223,63 @@ Integration tests running against the live Docker stack:
 ### Web UI Fix
 - **Map view video playback** — replaced small floating card with full side panel containing video player and detail view
 - **MinIO URL fix** — `MINIO_EXTERNAL_ENDPOINT` now defaults to `localhost:18080/video-stream` (env-var overridable) instead of hardcoded ngrok domain
+
+---
+
+## AI-Powered Video Search (v3.0)
+
+Integrates VideoIndexer's AI models into Open Testimony, making uploaded videos searchable by visual content and spoken words.
+
+### Architecture
+- **Bridge service** — standalone FastAPI on port 8003, loads OpenCLIP ViT-L-14 (768-dim) + Qwen3-Embedding-8B (4096-dim) + Whisper base models in-process
+- **pgvector** — PostgreSQL extension for vector similarity search; embeddings stored as rows alongside metadata, no separate index files
+- **Webhook pipeline** — OT API fires `POST /hooks/video-uploaded` after upload; bridge background worker picks up pending jobs
+
+### Database (Migration `005_add_pgvector.sql`)
+- `frame_embeddings` — one row per extracted video frame (video_id, frame_num, timestamp_ms, embedding vector(768))
+- `transcript_embeddings` — one row per spoken segment (video_id, segment_text, start_ms, end_ms, embedding vector(4096))
+- `video_index_status` — per-video indexing job tracking (status, frame_count, segment_count, error_message)
+- HNSW index on frame embeddings for fast approximate nearest-neighbor search
+
+### Indexing Pipeline (`bridge/indexing/`)
+- Downloads video from MinIO to temp path
+- Extracts frames at configurable interval, skips dark frames (brightness < 15)
+- Encodes frames with OpenCLIP ViT-L-14, batch INSERT into `frame_embeddings`
+- Generates 320px JPEG thumbnails at `/data/thumbnails/{video_id}/{timestamp_ms}.jpg`
+- Transcribes audio with Whisper base, encodes segments with Qwen3-Embedding-8B, INSERT into `transcript_embeddings`
+- Background asyncio worker polls for pending jobs every 10 seconds
+
+### Search Endpoints (`bridge/search/`)
+- `GET /search/visual?q=...` — text-to-video: encode text with OpenCLIP, pgvector cosine similarity on frame_embeddings
+- `POST /search/visual` — image-to-video: encode uploaded image, same search
+- `GET /search/transcript?q=...` — semantic: encode text with Qwen, cosine similarity on transcript_embeddings
+- `GET /search/transcript/exact?q=...` — exact text: case-insensitive ILIKE on segment_text
+
+### Admin Endpoints
+- `GET /indexing/status` — overall stats (pending/processing/completed/failed)
+- `GET /indexing/status/{video_id}` — per-video indexing detail
+- `POST /indexing/reindex/{video_id}` — re-index single video (deletes old embeddings first)
+- `POST /indexing/reindex-all` — re-index all videos
+- `GET /thumbnails/{video_id}/{ts}.jpg` — serve thumbnails with nearest-frame fallback
+
+### Web UI
+- **AI Search tab** — new view mode in header, four search modes: Visual (Text), Visual (Image), Transcript (Semantic), Transcript (Exact)
+- **Result cards** — horizontal layout with 160x96px thumbnail, score bar (green/yellow/red), timestamp, transcript text preview, play overlay on hover
+- **Inline video player** — clicking a result opens a split-pane player (left) + results (right); auto-seeks to matched timestamp; shows transcript text below player for transcript results
+- **Indexing stats** — footer showing indexed/processing/pending counts
+
+### Infrastructure
+- **Docker Compose** — bridge service added (service #6); PostgreSQL image changed to `pgvector/pgvector:pg16`; `bridge_temp` volume for temp video downloads
+- **Nginx** — `/ai-search/*` proxied to bridge with deferred DNS resolution (starts even if bridge is down)
+- **Auth** — bridge validates same JWT cookies as OT API (shared secret + algorithm)
+
+---
+
+## Mobile App Server Selector (v3.0)
+
+### Server URL Dropdown
+- **Preset server list** — dropdown with "Open Testimony (Main)" and "Other..." options in Settings screen
+- **Custom URL entry** — selecting "Other..." reveals a text field for entering a custom server URL (e.g., `http://192.168.1.100:18080/api`)
+- **Persistent storage** — selected server URL saved to FlutterSecureStorage, restored on app startup
+- **Extensible** — new regional servers added by appending to `serverPresets` list in `upload_service.dart`
+- **No-typo design** — preset dropdown prevents accidental URL mistakes; custom entry only shown when explicitly chosen

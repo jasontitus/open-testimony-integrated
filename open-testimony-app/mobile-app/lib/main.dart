@@ -43,7 +43,11 @@ class OpenTestimonyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         Provider<HardwareCryptoService>(create: (_) => HardwareCryptoService()),
-        Provider<UploadService>(create: (_) => UploadService()),
+        Provider<UploadService>(create: (_) {
+          final svc = UploadService();
+          svc.init(); // load saved server URL
+          return svc;
+        }),
         Provider<VideoService>(create: (_) => VideoService()),
         Provider<MediaImportService>(create: (_) => MediaImportService()),
       ],

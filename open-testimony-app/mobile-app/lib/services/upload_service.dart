@@ -2,17 +2,53 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:crypto/crypto.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'video_service.dart';
+
+/// Preset server configurations.
+/// Add new regional servers here as needed.
+class ServerPreset {
+  final String label;
+  final String url;
+  const ServerPreset(this.label, this.url);
+}
+
+const List<ServerPreset> serverPresets = [
+  ServerPreset('Open Testimony (Main)', 'https://opentestimony.ngrok.app/api'),
+  // Add regional servers here, e.g.:
+  // ServerPreset('EU Server', 'https://eu.opentestimony.org/api'),
+  // ServerPreset('Local Dev', 'http://192.168.1.100:18080/api'),
+];
+
+const String _serverUrlStorageKey = 'server_url';
 
 /// Service for uploading videos to the backend
 class UploadService {
-  static const String baseUrl = 'https://opentestimony.ngrok.app/api';
+  static String _baseUrl = serverPresets.first.url;
+  static String get baseUrl => _baseUrl;
 
   final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 30),
     receiveTimeout: const Duration(minutes: 5),
     sendTimeout: const Duration(minutes: 5),
   ));
+
+  /// Load saved server URL from secure storage.
+  /// Call once at app startup.
+  Future<void> init() async {
+    const storage = FlutterSecureStorage();
+    final saved = await storage.read(key: _serverUrlStorageKey);
+    if (saved != null && saved.isNotEmpty) {
+      _baseUrl = saved;
+    }
+  }
+
+  /// Update and persist the server URL.
+  Future<void> setServerUrl(String url) async {
+    _baseUrl = url;
+    const storage = FlutterSecureStorage();
+    await storage.write(key: _serverUrlStorageKey, value: url);
+  }
 
   /// Register device with backend
   Future<bool> registerDevice(
