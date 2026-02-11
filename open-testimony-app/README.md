@@ -195,17 +195,19 @@ flutter run
 - **Visual Search (Image)**: Upload a reference image to find visually similar frames
 - **Transcript Search (Semantic)**: Search by meaning across all transcribed audio
 - **Transcript Search (Exact)**: Find exact word matches in transcripts
-- **Quick Tag on Results**: Tag icon on each search result for instant tagging; existing tags displayed as pills
-- **Bulk Selection**: Select multiple results and tag them all at once via the sticky bottom bar
-- **Inline Playback**: Click any result to watch the video at the matched timestamp
+- **Grouped Results**: Results are clustered by video — each group shows the best thumbnail, match count badge, score, category, and tags. Click the chevron to expand individual time-stamped matches
+- **Video-Level Annotation**: Click a group header to open the inline player with a full annotation panel (category, tags, notes, location) — annotate the whole video without picking a specific time slice
+- **Inline Playback**: Expand a group and click an individual match to jump to its exact timestamp
+- **Bulk Selection**: Toggle "Select" mode to check entire video groups, then tag them all at once via the sticky bottom bar
 
-### Quick Tag System
-A fast, click-based tagging workflow available in both AI Search and List views:
-- **QuickTagMenu**: Popover showing all available tags as clickable pill toggles
-- **Instant Save**: Clicking a tag immediately saves via the API (no "Save" button needed)
+### Quick Annotate System
+A fast, click-based annotation workflow available in AI Search, List View, and the inline player:
+- **QuickTagMenu**: Popover (or inline panel) showing category chips and tag pill toggles
+- **Instant Save**: Clicking a tag or category immediately saves via the API (no "Save" button needed)
 - **Optimistic Updates**: Tags update in the UI instantly, with automatic revert on API failure
-- **Filter Input**: Narrow long tag lists by typing
+- **Filter & Create**: Narrow long tag lists by typing, or create new tags inline
 - **Bulk Mode**: When multiple videos are selected, the menu shows which tags are applied to all, some, or none
+- **Notes & Location**: The inline annotation panel in AI Search also supports free-text notes and location descriptions (saved via a Save button)
 - **Role-Based**: Only visible to staff and admin users
 
 ### Video Detail Panel
@@ -476,8 +478,9 @@ docker-compose exec -T db psql -U user opentestimony < backup_20240101.sql
 - [x] Support for multiple incident tags
 - [x] Support for photo capture
 - [x] AI-powered video search (visual + transcript)
-- [x] Quick Tag workflow for fast tagging from search results and list view
+- [x] Quick Annotate workflow for fast tagging from search results and list view
 - [x] Bulk tagging for multiple videos at once
+- [x] Grouped search results by video with inline annotation panel
 - [ ] Implement Restic automated backups
 - [ ] Add video playback in mobile app
 - [ ] Add video sharing functionality
