@@ -305,30 +305,40 @@ function BulkUpload() {
     setProgress(0);
     setResults(null);
 
-    const formData = new FormData();
-    files.forEach(f => formData.append('files', f));
+    const allResults = [];
+    let succeeded = 0;
+    let failed = 0;
 
-    try {
-      const res = await api.post('/bulk-upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        onUploadProgress: (e) => {
-          if (e.total) setProgress(Math.round((e.loaded / e.total) * 100));
-        },
-      });
-      setResults(res.data);
-      setFiles([]);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    } catch (err) {
-      setResults({
-        status: 'error',
-        total: files.length,
-        succeeded: 0,
-        failed: files.length,
-        results: [{ filename: 'Upload failed', status: 'error', detail: err.response?.data?.detail || err.message }],
-      });
-    } finally {
-      setUploading(false);
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const formData = new FormData();
+      formData.append('files', f);
+
+      try {
+        const res = await api.post('/bulk-upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        const fileResult = res.data.results?.[0] || { filename: f.name, status: 'success' };
+        allResults.push(fileResult);
+        succeeded++;
+      } catch (err) {
+        allResults.push({ filename: f.name, status: 'error', detail: err.response?.data?.detail || err.message });
+        failed++;
+      }
+
+      setProgress(Math.round(((i + 1) / files.length) * 100));
     }
+
+    setResults({
+      status: failed === 0 ? 'success' : succeeded === 0 ? 'error' : 'partial',
+      total: files.length,
+      succeeded,
+      failed,
+      results: allResults,
+    });
+    setFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    setUploading(false);
   };
 
   const totalSize = files.reduce((sum, f) => sum + f.size, 0);
@@ -575,7 +585,6 @@ function IndexingManagement() {
 
   const fetchStats = useCallback(async () => {
     try {
-      setLoading(true);
       const res = await aiApi.get('/indexing/status');
       setStats(res.data);
     } catch (err) {
@@ -585,7 +594,11 @@ function IndexingManagement() {
     }
   }, []);
 
-  useEffect(() => { fetchStats(); }, [fetchStats]);
+  useEffect(() => {
+    fetchStats();
+    const interval = setInterval(fetchStats, 5000);
+    return () => clearInterval(interval);
+  }, [fetchStats]);
 
   const handleReindexAll = async () => {
     if (!window.confirm('Re-index all videos? This will clear existing embeddings and re-process everything.')) return;

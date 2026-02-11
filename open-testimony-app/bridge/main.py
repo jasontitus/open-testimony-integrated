@@ -7,11 +7,11 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
 from config import settings
-from models import VideoIndexStatus
+from models import Base, VideoIndexStatus
 from auth import require_auth
 
 logging.basicConfig(level=logging.INFO)
@@ -88,6 +88,10 @@ def load_text_model():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load AI models on startup, start background indexing worker."""
+    with engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
+    Base.metadata.create_all(bind=engine)
     load_vision_model()
     load_text_model()
 
@@ -260,12 +264,27 @@ async def reindex_all(
     _user: dict = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
-    """Re-index all videos (admin)."""
+    """Re-index all videos (admin). Also creates index jobs for any videos missing from the index."""
     from models import FrameEmbedding, TranscriptEmbedding
 
     db.query(FrameEmbedding).delete()
     db.query(TranscriptEmbedding).delete()
 
+    # Create index jobs for any videos in the videos table that have no index status entry
+    missing = db.execute(
+        text(
+            "SELECT id, object_name FROM videos "
+            "WHERE id NOT IN (SELECT video_id FROM video_index_status)"
+        )
+    ).fetchall()
+    for row in missing:
+        db.add(VideoIndexStatus(
+            video_id=row[0],
+            object_name=row[1],
+            status="pending",
+        ))
+
+    # Reset all existing jobs to pending
     jobs = db.query(VideoIndexStatus).all()
     for job in jobs:
         job.status = "pending"
