@@ -36,6 +36,9 @@ postgres_data/
 # Node
 node_modules/
 
+# Original VideoIndexer project (full copy — not used; lean subset in video-indexer/)
+VideoIndexer-project/
+
 # VideoIndexer output
 video_index_output/
 video_thumbnails_output/

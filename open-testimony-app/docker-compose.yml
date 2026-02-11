@@ -80,8 +80,8 @@ services:
     build: ./bridge
     volumes:
       - ./bridge:/app
-      # Mount VideoIndexer source read-only for model code reuse
-      - ../VideoIndexer-project/src:/opt/video-indexer/src:ro
+      # Mount VideoIndexer vision encoder modules (read-only)
+      - ../video-indexer:/opt/video-indexer/src:ro
       - bridge_temp:/data/temp
     environment:
       - DATABASE_URL=postgresql://user:pass@db:5432/opentestimony
