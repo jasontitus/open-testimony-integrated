@@ -21,7 +21,7 @@ from sqlalchemy.orm import sessionmaker
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import settings
-from models import Base, FrameEmbedding, TranscriptEmbedding, VideoIndexStatus
+from models import Base, CaptionEmbedding, FrameEmbedding, TranscriptEmbedding, VideoIndexStatus
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
@@ -82,6 +82,7 @@ def clean_tables(db_engine):
     """Truncate bridge tables between tests."""
     yield
     with db_engine.connect() as conn:
+        conn.execute(text("DELETE FROM caption_embeddings"))
         conn.execute(text("DELETE FROM frame_embeddings"))
         conn.execute(text("DELETE FROM transcript_embeddings"))
         conn.execute(text("DELETE FROM video_index_status"))
@@ -98,15 +99,15 @@ def db_session(TestingSessionLocal):
 
 @pytest.fixture
 def mock_vision_model():
-    """Mock vision model that returns fake embeddings."""
+    """Mock vision model that returns fake embeddings (1152-dim for SigLIP)."""
     model = MagicMock()
     # OpenCLIP-style encode_image
     model.encode_image = MagicMock(
-        side_effect=lambda x: _fake_tensor(x.shape[0], 1280)
+        side_effect=lambda x: _fake_tensor(x.shape[0], 1152)
     )
     # OpenCLIP-style encode_text
     model.encode_text = MagicMock(
-        side_effect=lambda x: _fake_tensor(x.shape[0], 1280)
+        side_effect=lambda x: _fake_tensor(x.shape[0], 1152)
     )
     return model
 
@@ -136,6 +137,36 @@ def mock_text_model():
 
 
 @pytest.fixture
+def mock_caption_model():
+    """Mock Qwen3-VL caption model."""
+    import torch
+
+    model = MagicMock()
+    # generate returns a tensor of token ids
+    model.generate = MagicMock(
+        return_value=torch.tensor([[0] * 10 + [1, 2, 3, 4, 5]])
+    )
+    return model
+
+
+@pytest.fixture
+def mock_caption_processor():
+    """Mock Qwen3-VL processor."""
+    import torch
+
+    processor = MagicMock()
+    processor.apply_chat_template = MagicMock(return_value="<fake template>")
+    # Callable processor returns a dict-like object with input_ids
+    mock_inputs = MagicMock()
+    mock_inputs.input_ids = torch.tensor([[0] * 10])
+    mock_inputs.__getitem__ = lambda self, key: getattr(self, key)
+    mock_inputs.to = MagicMock(return_value=mock_inputs)
+    processor.return_value = mock_inputs
+    processor.decode = MagicMock(return_value="A person wearing a red hat standing near a building")
+    return processor
+
+
+@pytest.fixture
 def mock_minio():
     """Mock MinIO client."""
     client = MagicMock()
@@ -153,7 +184,8 @@ def _fake_tensor(batch_size, dim):
 
 
 @pytest.fixture
-def app(TestingSessionLocal, mock_vision_model, mock_vision_preprocess, mock_text_model):
+def app(TestingSessionLocal, mock_vision_model, mock_vision_preprocess, mock_text_model,
+        mock_caption_model, mock_caption_processor):
     """Create a FastAPI test app with mocked models and DB."""
     import main as bridge_main
 
@@ -161,6 +193,8 @@ def app(TestingSessionLocal, mock_vision_model, mock_vision_preprocess, mock_tex
     bridge_main.vision_model = mock_vision_model
     bridge_main.vision_preprocess = mock_vision_preprocess
     bridge_main.text_model = mock_text_model
+    bridge_main.caption_model = mock_caption_model
+    bridge_main.caption_processor = mock_caption_processor
 
     # Override DB session
     def override_get_db():

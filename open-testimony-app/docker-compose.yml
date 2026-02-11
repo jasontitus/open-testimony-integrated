@@ -93,12 +93,17 @@ services:
       - JWT_SECRET_KEY=change-me-in-production-use-a-real-secret
       # Model configuration
       - VISION_MODEL_FAMILY=open_clip
-      - VISION_MODEL_NAME=ViT-bigG-14
-      - VISION_MODEL_PRETRAINED=laion2b_s39b_b160k
-      - VISION_EMBEDDING_DIM=1280
+      - VISION_MODEL_NAME=ViT-SO400M-14-SigLIP-384
+      - VISION_MODEL_PRETRAINED=webli
+      - VISION_EMBEDDING_DIM=1152
       - TRANSCRIPT_MODEL_NAME=Qwen/Qwen3-Embedding-8B
       - TRANSCRIPT_EMBEDDING_DIM=4096
       - WHISPER_MODEL=large-v3
+      # Caption model (Qwen3-VL for frame descriptions)
+      - CAPTION_MODEL_NAME=Qwen/Qwen3-VL-8B-Instruct
+      - CAPTION_ENABLED=true
+      - CAPTION_MAX_TOKENS=256
+      - CAPTION_BATCH_SIZE=1
       - DEVICE=cpu
       - USE_FP16=false
       - FRAME_INTERVAL_SEC=2.0

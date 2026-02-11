@@ -16,6 +16,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base
 
+from config import settings
+
 Base = declarative_base()
 
 
@@ -26,7 +28,7 @@ class FrameEmbedding(Base):
     video_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     frame_num = Column(Integer, nullable=False)
     timestamp_ms = Column(Integer, nullable=False)
-    embedding = Column(Vector(1280))
+    embedding = Column(Vector(settings.VISION_EMBEDDING_DIM))
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
 
 
@@ -38,7 +40,19 @@ class TranscriptEmbedding(Base):
     segment_text = Column(Text, nullable=False)
     start_ms = Column(Integer, nullable=False)
     end_ms = Column(Integer, nullable=False)
-    embedding = Column(Vector(4096))
+    embedding = Column(Vector(settings.TRANSCRIPT_EMBEDDING_DIM))
+    created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
+
+
+class CaptionEmbedding(Base):
+    __tablename__ = "caption_embeddings"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    video_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    frame_num = Column(Integer, nullable=False)
+    timestamp_ms = Column(Integer, nullable=False)
+    caption_text = Column(Text, nullable=False)
+    embedding = Column(Vector(settings.TRANSCRIPT_EMBEDDING_DIM))
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
 
 
@@ -53,8 +67,10 @@ class VideoIndexStatus(Base):
     status = Column(String(20), nullable=False, default="pending")
     visual_indexed = Column(Boolean, default=False)
     transcript_indexed = Column(Boolean, default=False)
+    caption_indexed = Column(Boolean, default=False)
     frame_count = Column(Integer, nullable=True)
     segment_count = Column(Integer, nullable=True)
+    caption_count = Column(Integer, nullable=True)
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
     completed_at = Column(DateTime(timezone=True), nullable=True)

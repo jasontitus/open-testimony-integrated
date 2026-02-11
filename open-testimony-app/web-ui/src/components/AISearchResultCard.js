@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Clock, Film, MessageSquare, Play, Tag, CheckSquare, Square } from 'lucide-react';
+import { Clock, Film, Info, MessageSquare, Play, Tag, CheckSquare, Square } from 'lucide-react';
 import { useAuth } from '../auth';
 import QuickTagMenu from './QuickTagMenu';
 
@@ -13,14 +13,15 @@ function formatTimestamp(ms) {
 
 export default function AISearchResultCard({
   result, mode, onClick, availableTags, tagCounts, onVideoTagsChanged, onCategoryChanged,
-  selectable, selected, onToggleSelect,
+  selectable, selected, onToggleSelect, searchTiming,
 }) {
   const { user } = useAuth();
-  const isVisual = mode === 'visual_text' || mode === 'visual_image';
+  const isVisual = mode === 'visual_text' || mode === 'visual_image' || mode === 'combined' || mode === 'caption_semantic';
   const score = result.score != null ? result.score : null;
   const scorePercent = score != null ? Math.round(score * 100) : null;
   const [imgError, setImgError] = useState(false);
   const [showTagMenu, setShowTagMenu] = useState(false);
+  const [showDiagnostic, setShowDiagnostic] = useState(false);
   const [localTags, setLocalTags] = useState(null);
   const [localCategory, setLocalCategory] = useState(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
@@ -57,6 +58,11 @@ export default function AISearchResultCard({
   const handleCheckbox = (e) => {
     e.stopPropagation();
     onToggleSelect?.(result);
+  };
+
+  const handleInfoClick = (e) => {
+    e.stopPropagation();
+    setShowDiagnostic(prev => !prev);
   };
 
   const displayTags = localTags || result.incident_tags || null;
@@ -113,9 +119,19 @@ export default function AISearchResultCard({
               <span className="text-xs font-mono text-gray-400 truncate max-w-[140px]">
                 {result.video_id.slice(0, 8)}...
               </span>
+              {/* Source badge */}
+              {result.source && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                  result.source === 'visual'
+                    ? 'bg-purple-900/30 border border-purple-500/30 text-purple-300'
+                    : 'bg-teal-900/30 border border-teal-500/30 text-teal-300'
+                }`}>
+                  {result.source === 'visual' ? 'Visual' : 'Caption'}
+                </span>
+              )}
             </div>
             {scorePercent != null && (
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 shrink-0">
                 <div className="w-12 h-1.5 bg-gray-700 rounded-full overflow-hidden">
                   <div
                     className="h-full rounded-full"
@@ -126,6 +142,18 @@ export default function AISearchResultCard({
                   />
                 </div>
                 <span className="text-[10px] font-mono text-gray-400">{scorePercent}%</span>
+                {/* (i) diagnostic button */}
+                <button
+                  onClick={handleInfoClick}
+                  className={`p-0.5 rounded transition ${
+                    showDiagnostic
+                      ? 'text-blue-400'
+                      : 'text-gray-600 hover:text-gray-400'
+                  }`}
+                  title="Show diagnostic info"
+                >
+                  <Info size={12} />
+                </button>
               </div>
             )}
           </div>
@@ -144,6 +172,13 @@ export default function AISearchResultCard({
           {result.segment_text && (
             <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed">
               &ldquo;{result.segment_text}&rdquo;
+            </p>
+          )}
+
+          {/* Caption text preview (for caption/combined results) */}
+          {result.caption_text && !result.segment_text && (
+            <p className="text-xs text-teal-400/80 line-clamp-2 leading-relaxed">
+              {result.caption_text}
             </p>
           )}
 
@@ -167,6 +202,51 @@ export default function AISearchResultCard({
           )}
         </div>
       </div>
+
+      {/* Diagnostic info popover */}
+      {showDiagnostic && (
+        <div className="bg-gray-900 border border-gray-600 rounded-lg p-3 mx-2 mb-2 space-y-1.5 text-xs">
+          <p className="text-[10px] text-gray-500 uppercase font-bold">Diagnostic Info</p>
+          {result.source && (
+            <div className="flex justify-between">
+              <span className="text-gray-500">Source</span>
+              <span className={result.source === 'visual' ? 'text-purple-300' : 'text-teal-300'}>
+                {result.source}
+              </span>
+            </div>
+          )}
+          {score != null && (
+            <div className="flex justify-between">
+              <span className="text-gray-500">Score</span>
+              <span className="text-gray-300 font-mono">{score.toFixed(4)}</span>
+            </div>
+          )}
+          {result.visual_score != null && (
+            <div className="flex justify-between">
+              <span className="text-gray-500">Visual score</span>
+              <span className="text-purple-300 font-mono">{result.visual_score.toFixed(4)}</span>
+            </div>
+          )}
+          {result.caption_score != null && (
+            <div className="flex justify-between">
+              <span className="text-gray-500">Caption score</span>
+              <span className="text-teal-300 font-mono">{result.caption_score.toFixed(4)}</span>
+            </div>
+          )}
+          {result.caption_text && (
+            <div>
+              <span className="text-gray-500 block mb-0.5">Caption</span>
+              <p className="text-gray-300 text-[11px] leading-relaxed">{result.caption_text}</p>
+            </div>
+          )}
+          {searchTiming && (
+            <div className="flex justify-between">
+              <span className="text-gray-500">Response time</span>
+              <span className="text-gray-300 font-mono">{searchTiming.total_ms}ms</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Annotate button — full-width bar at bottom */}
       {canEdit && (

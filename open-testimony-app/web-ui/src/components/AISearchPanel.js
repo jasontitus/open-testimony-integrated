@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Search, Upload, Film, MessageSquare, Loader, X, CheckSquare, Tag, ChevronDown, ChevronRight, Square, Save, MapPin, FileText } from 'lucide-react';
+import { Search, Upload, Film, MessageSquare, Loader, X, CheckSquare, Tag, ChevronDown, ChevronRight, Square, Save, MapPin, FileText, Eye } from 'lucide-react';
 import axios from 'axios';
 import api from '../api';
 import { useAuth } from '../auth';
@@ -10,6 +10,7 @@ import AddressAutocomplete from './AddressAutocomplete';
 const SEARCH_MODES = [
   { id: 'visual_text', label: 'Visual (Text)', icon: Film, description: 'Describe what you see' },
   { id: 'visual_image', label: 'Visual (Image)', icon: Upload, description: 'Upload a reference image' },
+  { id: 'combined', label: 'Combined', icon: Eye, description: 'Visual + scene descriptions' },
   { id: 'transcript_semantic', label: 'Transcript (Semantic)', icon: MessageSquare, description: 'Search by meaning' },
   { id: 'transcript_exact', label: 'Transcript (Exact)', icon: Search, description: 'Search exact words' },
 ];
@@ -28,13 +29,16 @@ function VideoResultGroup({
   const best = group.results[0];
   const count = group.results.length;
   const scorePercent = group.bestScore != null ? Math.round(group.bestScore * 100) : null;
-  const isVisual = mode === 'visual_text' || mode === 'visual_image';
+  const isVisual = mode === 'visual_text' || mode === 'visual_image' || mode === 'combined' || mode === 'caption_semantic';
 
   const thumbnailUrl = best.thumbnail_url ? `/ai-search${best.thumbnail_url}` : null;
   const [imgError, setImgError] = useState(false);
 
   const displayTags = best.incident_tags || [];
   const displayCategory = best.category || null;
+
+  // Source badge for combined mode
+  const bestSource = best.source;
 
   // Check if all results in this group are selected
   const allSelected = group.results.every(r => isResultSelected(r));
@@ -106,6 +110,15 @@ function VideoResultGroup({
             <span className="px-1.5 py-0.5 bg-blue-900/30 border border-blue-500/30 rounded-full text-[10px] text-blue-300 font-medium shrink-0">
               {count} match{count !== 1 ? 'es' : ''}
             </span>
+            {bestSource && (
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium shrink-0 ${
+                bestSource === 'visual'
+                  ? 'bg-purple-900/30 border border-purple-500/30 text-purple-300'
+                  : 'bg-teal-900/30 border border-teal-500/30 text-teal-300'
+              }`}>
+                {bestSource === 'visual' ? 'Visual' : 'Caption'}
+              </span>
+            )}
           </div>
 
           {/* Score bar */}
@@ -170,6 +183,7 @@ function VideoResultGroup({
               selectable={selectMode}
               selected={isResultSelected(result)}
               onToggleSelect={onToggleSelect}
+              searchTiming={searchTiming}
             />
           ))}
         </div>
@@ -187,6 +201,8 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [stats, setStats] = useState(null);
+  const [searchTiming, setSearchTiming] = useState(null);
+  const [searchMode, setSearchMode] = useState('visual_text');
 
   // Inline video player state
   const [activeResult, setActiveResult] = useState(null);
@@ -265,6 +281,8 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
         const formData = new FormData();
         formData.append('image', imageFile);
         res = await aiApi.post('/search/visual', formData, { params: { limit: 20 } });
+      } else if (mode === 'combined') {
+        res = await aiApi.get('/search/combined', { params: { q: query, limit: 20 } });
       } else if (mode === 'transcript_semantic') {
         res = await aiApi.get('/search/transcript', { params: { q: query, limit: 20 } });
       } else if (mode === 'transcript_exact') {
@@ -272,6 +290,8 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
       }
       const rawResults = res.data.results || [];
       setResults(rawResults);
+      setSearchTiming(res.data.timing || null);
+      setSearchMode(mode);
 
       // Enrich results with existing tags + category from the API
       const uniqueIds = [...new Set(rawResults.map(r => r.video_id))];
@@ -424,7 +444,7 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
     <div className="h-full flex flex-col bg-gray-900 w-full">
       {/* Search mode selector + form */}
       <div className="p-4 border-b border-gray-700 shrink-0">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
           {SEARCH_MODES.map(m => {
             const Icon = m.icon;
             return (
@@ -466,6 +486,7 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
               onChange={e => setQuery(e.target.value)}
               placeholder={
                 mode === 'visual_text' ? 'Describe what you\'re looking for...' :
+                mode === 'combined' ? 'Search visual + scene descriptions...' :
                 mode === 'transcript_semantic' ? 'Search by meaning...' :
                 'Search exact words...'
               }
@@ -527,6 +548,12 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
             {activeResult.segment_text && (
               <div className="px-4 py-2 bg-gray-800 border-t border-gray-700">
                 <p className="text-sm text-gray-300">&ldquo;{activeResult.segment_text}&rdquo;</p>
+              </div>
+            )}
+            {activeResult.caption_text && (
+              <div className="px-4 py-2 bg-gray-800 border-t border-gray-700">
+                <p className="text-[10px] text-teal-400 uppercase font-bold mb-1">AI Scene Description</p>
+                <p className="text-sm text-gray-300">{activeResult.caption_text}</p>
               </div>
             )}
 

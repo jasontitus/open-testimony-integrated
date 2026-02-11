@@ -22,14 +22,28 @@ class Settings:
     JWT_ALGORITHM: str = "HS256"
 
     # Vision model
-    # open_clip: "ViT-L-14", "ViT-L-14-336", "ViT-B-32", "ViT-H-14", etc.
+    # open_clip: "ViT-SO400M-14-SigLIP-384", "ViT-L-14", "ViT-bigG-14", etc.
     # pe_core: "PE-Core-L14-336", "PE-Core-B16-224", "PE-Core-G14-448"
     VISION_MODEL_FAMILY: str = os.environ.get("VISION_MODEL_FAMILY", "open_clip")
-    VISION_MODEL_NAME: str = os.environ.get("VISION_MODEL_NAME", "ViT-bigG-14")
+    VISION_MODEL_NAME: str = os.environ.get("VISION_MODEL_NAME", "ViT-SO400M-14-SigLIP-384")
     VISION_MODEL_PRETRAINED: str = os.environ.get(
-        "VISION_MODEL_PRETRAINED", "laion2b_s39b_b160k"
+        "VISION_MODEL_PRETRAINED", "webli"
     )
-    VISION_EMBEDDING_DIM: int = int(os.environ.get("VISION_EMBEDDING_DIM", "1280"))
+    VISION_EMBEDDING_DIM: int = int(os.environ.get("VISION_EMBEDDING_DIM", "1152"))
+
+    # Caption model (Qwen3-VL for frame description generation)
+    CAPTION_MODEL_NAME: str = os.environ.get(
+        "CAPTION_MODEL_NAME", "Qwen/Qwen3-VL-8B-Instruct"
+    )
+    CAPTION_ENABLED: bool = os.environ.get("CAPTION_ENABLED", "true").lower() == "true"
+    CAPTION_MAX_TOKENS: int = int(os.environ.get("CAPTION_MAX_TOKENS", "256"))
+    CAPTION_BATCH_SIZE: int = int(os.environ.get("CAPTION_BATCH_SIZE", "1"))
+    CAPTION_PROMPT: str = os.environ.get(
+        "CAPTION_PROMPT",
+        "Describe this image in detail, including all people, their physical actions, "
+        "body positions, objects they are holding or carrying, and any physical "
+        "interactions between people.",
+    )
 
     # Transcript model
     TRANSCRIPT_MODEL_NAME: str = os.environ.get(

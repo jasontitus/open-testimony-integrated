@@ -25,6 +25,8 @@ SessionLocal = sessionmaker(bind=engine)
 vision_model = None
 vision_preprocess = None
 text_model = None
+caption_model = None
+caption_processor = None
 
 
 def get_db():
@@ -85,6 +87,99 @@ def load_text_model():
     logger.info("Text model loaded successfully")
 
 
+def load_caption_model():
+    """Load the caption model (Qwen3-VL) for frame description generation."""
+    global caption_model, caption_processor
+
+    if not settings.CAPTION_ENABLED:
+        logger.info("Caption model disabled (CAPTION_ENABLED=false)")
+        return
+
+    from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
+
+    logger.info(f"Loading caption model: {settings.CAPTION_MODEL_NAME}")
+    caption_processor = AutoProcessor.from_pretrained(settings.CAPTION_MODEL_NAME)
+    caption_model = Qwen3VLForConditionalGeneration.from_pretrained(
+        settings.CAPTION_MODEL_NAME,
+        torch_dtype="auto",
+        device_map=settings.DEVICE if settings.DEVICE != "cpu" else None,
+    )
+    if settings.DEVICE == "cpu":
+        caption_model = caption_model.float()
+    caption_model.eval()
+    logger.info("Caption model loaded successfully")
+
+
+def _migrate_embedding_dimensions():
+    """Auto-migrate schema when embedding dimensions change or new tables are needed."""
+    with engine.connect() as conn:
+        # Check frame_embeddings column dimension
+        row = conn.execute(text("""
+            SELECT atttypmod FROM pg_attribute
+            JOIN pg_class ON pg_class.oid = pg_attribute.attrelid
+            WHERE pg_class.relname = 'frame_embeddings'
+            AND pg_attribute.attname = 'embedding'
+        """)).fetchone()
+
+        if row and row[0] != settings.VISION_EMBEDDING_DIM:
+            logger.warning(
+                f"frame_embeddings.embedding dimension mismatch: "
+                f"DB={row[0]}, config={settings.VISION_EMBEDDING_DIM}. "
+                f"Dropping and recreating column (data will be regenerated via reindex)."
+            )
+            conn.execute(text("ALTER TABLE frame_embeddings DROP COLUMN embedding"))
+            conn.execute(text(
+                f"ALTER TABLE frame_embeddings ADD COLUMN embedding vector({settings.VISION_EMBEDDING_DIM})"
+            ))
+            conn.commit()
+
+        # Add caption_indexed / caption_count to video_index_status if missing
+        cols = conn.execute(text("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'video_index_status'
+        """)).fetchall()
+        col_names = {c[0] for c in cols}
+
+        if "caption_indexed" not in col_names:
+            logger.info("Adding caption_indexed column to video_index_status")
+            conn.execute(text(
+                "ALTER TABLE video_index_status ADD COLUMN caption_indexed BOOLEAN DEFAULT false"
+            ))
+        if "caption_count" not in col_names:
+            logger.info("Adding caption_count column to video_index_status")
+            conn.execute(text(
+                "ALTER TABLE video_index_status ADD COLUMN caption_count INTEGER"
+            ))
+        conn.commit()
+
+        # Create caption_embeddings table if missing
+        table_exists = conn.execute(text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'caption_embeddings'
+            )
+        """)).scalar()
+
+        if not table_exists:
+            logger.info("Creating caption_embeddings table")
+            conn.execute(text(f"""
+                CREATE TABLE caption_embeddings (
+                    id BIGSERIAL PRIMARY KEY,
+                    video_id UUID NOT NULL,
+                    frame_num INTEGER NOT NULL,
+                    timestamp_ms INTEGER NOT NULL,
+                    caption_text TEXT NOT NULL,
+                    embedding vector({settings.TRANSCRIPT_EMBEDDING_DIM}),
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_caption_embeddings_video_id "
+                "ON caption_embeddings (video_id)"
+            ))
+            conn.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load AI models on startup, start background indexing worker."""
@@ -92,8 +187,10 @@ async def lifespan(app: FastAPI):
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.commit()
     Base.metadata.create_all(bind=engine)
+    _migrate_embedding_dimensions()
     load_vision_model()
     load_text_model()
+    load_caption_model()
 
     # Start the background indexing worker
     from indexing.worker import indexing_worker
@@ -212,8 +309,10 @@ async def indexing_status_for_video(
         "status": job.status,
         "visual_indexed": job.visual_indexed,
         "transcript_indexed": job.transcript_indexed,
+        "caption_indexed": job.caption_indexed,
         "frame_count": job.frame_count,
         "segment_count": job.segment_count,
+        "caption_count": job.caption_count,
         "error_message": job.error_message,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
@@ -228,7 +327,7 @@ async def reindex_video(
 ):
     """Manually trigger re-indexing for a video (admin)."""
     import uuid as uuid_mod
-    from models import FrameEmbedding, TranscriptEmbedding
+    from models import FrameEmbedding, TranscriptEmbedding, CaptionEmbedding
 
     video_uuid = uuid_mod.UUID(video_id)
 
@@ -245,13 +344,18 @@ async def reindex_video(
     db.query(TranscriptEmbedding).filter(
         TranscriptEmbedding.video_id == video_uuid
     ).delete()
+    db.query(CaptionEmbedding).filter(
+        CaptionEmbedding.video_id == video_uuid
+    ).delete()
 
     # Reset job to pending
     job.status = "pending"
     job.visual_indexed = False
     job.transcript_indexed = False
+    job.caption_indexed = False
     job.frame_count = None
     job.segment_count = None
+    job.caption_count = None
     job.error_message = None
     job.completed_at = None
     db.commit()
@@ -265,10 +369,11 @@ async def reindex_all(
     db: Session = Depends(get_db),
 ):
     """Re-index all videos (admin). Also creates index jobs for any videos missing from the index."""
-    from models import FrameEmbedding, TranscriptEmbedding
+    from models import FrameEmbedding, TranscriptEmbedding, CaptionEmbedding
 
     db.query(FrameEmbedding).delete()
     db.query(TranscriptEmbedding).delete()
+    db.query(CaptionEmbedding).delete()
 
     # Create index jobs for any videos in the videos table that have no index status entry
     missing = db.execute(
@@ -290,8 +395,10 @@ async def reindex_all(
         job.status = "pending"
         job.visual_indexed = False
         job.transcript_indexed = False
+        job.caption_indexed = False
         job.frame_count = None
         job.segment_count = None
+        job.caption_count = None
         job.error_message = None
         job.completed_at = None
     db.commit()
@@ -342,4 +449,5 @@ async def health():
         "status": "healthy",
         "vision_model_loaded": vision_model is not None,
         "text_model_loaded": text_model is not None,
+        "caption_model_loaded": caption_model is not None,
     }

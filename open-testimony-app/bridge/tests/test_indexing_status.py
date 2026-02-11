@@ -129,7 +129,7 @@ class TestReindex:
                 video_id=video_uuid,
                 frame_num=0,
                 timestamp_ms=0,
-                embedding=np.random.randn(1280).tolist(),
+                embedding=np.random.randn(1152).tolist(),
             )
         )
         db_session.add(
