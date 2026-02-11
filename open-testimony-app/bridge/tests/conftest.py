@@ -102,11 +102,11 @@ def mock_vision_model():
     model = MagicMock()
     # OpenCLIP-style encode_image
     model.encode_image = MagicMock(
-        side_effect=lambda x: _fake_tensor(x.shape[0], 768)
+        side_effect=lambda x: _fake_tensor(x.shape[0], 1280)
     )
     # OpenCLIP-style encode_text
     model.encode_text = MagicMock(
-        side_effect=lambda x: _fake_tensor(x.shape[0], 768)
+        side_effect=lambda x: _fake_tensor(x.shape[0], 1280)
     )
     return model
 

@@ -9,7 +9,7 @@ CREATE TABLE frame_embeddings (
     video_id      UUID NOT NULL REFERENCES videos(id),
     frame_num     INTEGER NOT NULL,
     timestamp_ms  INTEGER NOT NULL,
-    embedding     vector(768),
+    embedding     vector(1280),
     created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX frame_emb_hnsw ON frame_embeddings

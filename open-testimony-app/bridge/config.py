@@ -22,14 +22,14 @@ class Settings:
     JWT_ALGORITHM: str = "HS256"
 
     # Vision model
-    # open_clip: "ViT-L-14", "ViT-B-32", etc.
+    # open_clip: "ViT-L-14", "ViT-L-14-336", "ViT-B-32", "ViT-H-14", etc.
     # pe_core: "PE-Core-L14-336", "PE-Core-B16-224", "PE-Core-G14-448"
     VISION_MODEL_FAMILY: str = os.environ.get("VISION_MODEL_FAMILY", "open_clip")
-    VISION_MODEL_NAME: str = os.environ.get("VISION_MODEL_NAME", "ViT-L-14")
+    VISION_MODEL_NAME: str = os.environ.get("VISION_MODEL_NAME", "ViT-bigG-14")
     VISION_MODEL_PRETRAINED: str = os.environ.get(
-        "VISION_MODEL_PRETRAINED", "datacomp_xl_s13b_b90k"
+        "VISION_MODEL_PRETRAINED", "laion2b_s39b_b160k"
     )
-    VISION_EMBEDDING_DIM: int = int(os.environ.get("VISION_EMBEDDING_DIM", "768"))
+    VISION_EMBEDDING_DIM: int = int(os.environ.get("VISION_EMBEDDING_DIM", "1280"))
 
     # Transcript model
     TRANSCRIPT_MODEL_NAME: str = os.environ.get(
@@ -40,7 +40,7 @@ class Settings:
     )
 
     # Whisper model
-    WHISPER_MODEL: str = os.environ.get("WHISPER_MODEL", "base")
+    WHISPER_MODEL: str = os.environ.get("WHISPER_MODEL", "large-v3")
 
     # Processing
     DEVICE: str = os.environ.get("DEVICE", "cpu")

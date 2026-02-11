@@ -26,7 +26,7 @@ class FrameEmbedding(Base):
     video_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     frame_num = Column(Integer, nullable=False)
     timestamp_ms = Column(Integer, nullable=False)
-    embedding = Column(Vector(768))
+    embedding = Column(Vector(1280))
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
 
 
