@@ -231,12 +231,12 @@ Integration tests running against the live Docker stack:
 Integrates VideoIndexer's AI models into Open Testimony, making uploaded videos searchable by visual content and spoken words.
 
 ### Architecture
-- **Bridge service** — standalone FastAPI on port 8003, loads OpenCLIP ViT-L-14 (768-dim) + Qwen3-Embedding-8B (4096-dim) + Whisper base models in-process
+- **Bridge service** — standalone FastAPI on port 8003, loads OpenCLIP ViT-bigG-14 (1280-dim) + Qwen3-Embedding-8B (4096-dim) + Whisper large-v3 models in-process
 - **pgvector** — PostgreSQL extension for vector similarity search; embeddings stored as rows alongside metadata, no separate index files
 - **Webhook pipeline** — OT API fires `POST /hooks/video-uploaded` after upload; bridge background worker picks up pending jobs
 
 ### Database (Migration `005_add_pgvector.sql`)
-- `frame_embeddings` — one row per extracted video frame (video_id, frame_num, timestamp_ms, embedding vector(768))
+- `frame_embeddings` — one row per extracted video frame (video_id, frame_num, timestamp_ms, embedding vector(1280))
 - `transcript_embeddings` — one row per spoken segment (video_id, segment_text, start_ms, end_ms, embedding vector(4096))
 - `video_index_status` — per-video indexing job tracking (status, frame_count, segment_count, error_message)
 - HNSW index on frame embeddings for fast approximate nearest-neighbor search
@@ -244,9 +244,9 @@ Integrates VideoIndexer's AI models into Open Testimony, making uploaded videos 
 ### Indexing Pipeline (`bridge/indexing/`)
 - Downloads video from MinIO to temp path
 - Extracts frames at configurable interval, skips dark frames (brightness < 15)
-- Encodes frames with OpenCLIP ViT-L-14, batch INSERT into `frame_embeddings`
+- Encodes frames with OpenCLIP ViT-bigG-14, batch INSERT into `frame_embeddings`
 - Generates 320px JPEG thumbnails at `/data/thumbnails/{video_id}/{timestamp_ms}.jpg`
-- Transcribes audio with Whisper base, encodes segments with Qwen3-Embedding-8B, INSERT into `transcript_embeddings`
+- Transcribes audio with Whisper large-v3, encodes segments with Qwen3-Embedding-8B, INSERT into `transcript_embeddings`
 - Background asyncio worker polls for pending jobs every 10 seconds
 
 ### Search Endpoints (`bridge/search/`)

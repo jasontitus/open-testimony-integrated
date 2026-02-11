@@ -23,7 +23,7 @@ class TestFrameEmbeddingModel:
             video_id=video_uuid,
             frame_num=0,
             timestamp_ms=2000,
-            embedding=np.random.randn(768).tolist(),
+            embedding=np.random.randn(1280).tolist(),
         )
         db_session.add(emb)
         db_session.commit()
@@ -36,7 +36,7 @@ class TestFrameEmbeddingModel:
         assert result is not None
         assert result.frame_num == 0
         assert result.timestamp_ms == 2000
-        assert len(result.embedding) == 768
+        assert len(result.embedding) == 1280
 
     def test_multiple_frames_per_video(self, db_session):
         """Multiple frames can be stored per video."""
@@ -49,7 +49,7 @@ class TestFrameEmbeddingModel:
                     video_id=video_uuid,
                     frame_num=i,
                     timestamp_ms=i * 2000,
-                    embedding=np.random.randn(768).tolist(),
+                    embedding=np.random.randn(1280).tolist(),
                 )
             )
         db_session.commit()

@@ -99,7 +99,7 @@ Features: live recording with GPS + ECDSA signing, gallery import with EXIF extr
 
 The bridge service indexes every uploaded video automatically:
 
-1. **Visual indexing** -- extracts frames at a configurable interval (default 2s), encodes each frame with the vision model, stores 768-dim embeddings in pgvector
+1. **Visual indexing** -- extracts frames at a configurable interval (default 2s), encodes each frame with the vision model, stores 1280-dim embeddings in pgvector
 2. **Transcript indexing** -- transcribes audio with Whisper, encodes segments with Qwen3-Embedding-8B, stores 4096-dim embeddings in pgvector
 
 Search modes available in the web UI's AI Search tab:
@@ -110,7 +110,7 @@ Search modes available in the web UI's AI Search tab:
 
 ### Switching vision models
 
-The default is OpenCLIP ViT-L-14. To use PE-Core instead, update the bridge environment in `docker-compose.yml`:
+The default is OpenCLIP ViT-bigG-14. To use PE-Core instead, update the bridge environment in `docker-compose.yml`:
 
 ```yaml
 - VISION_MODEL_FAMILY=pe_core
@@ -148,10 +148,10 @@ Key environment variables (set in `open-testimony-app/docker-compose.yml`):
 | `ADMIN_PASSWORD` | api | `admin` | Initial admin password |
 | `JWT_SECRET_KEY` | api, bridge | `change-me-in-production...` | Shared JWT signing key |
 | `VISION_MODEL_FAMILY` | bridge | `open_clip` | `open_clip` or `pe_core` |
-| `VISION_MODEL_NAME` | bridge | `ViT-L-14` | Model name within family |
-| `VISION_MODEL_PRETRAINED` | bridge | `datacomp_xl_s13b_b90k` | OpenCLIP pretrained weights |
-| `VISION_EMBEDDING_DIM` | bridge | `768` | Must match model output dim |
-| `WHISPER_MODEL` | bridge | `base` | Whisper model size |
+| `VISION_MODEL_NAME` | bridge | `ViT-bigG-14` | Model name within family |
+| `VISION_MODEL_PRETRAINED` | bridge | `laion2b_s39b_b160k` | OpenCLIP pretrained weights |
+| `VISION_EMBEDDING_DIM` | bridge | `1280` | Must match model output dim |
+| `WHISPER_MODEL` | bridge | `large-v3` | Whisper model size |
 | `DEVICE` | bridge | `cpu` | `cpu` or `cuda` |
 | `FRAME_INTERVAL_SEC` | bridge | `2.0` | Seconds between extracted frames |
 
@@ -160,7 +160,7 @@ Key environment variables (set in `open-testimony-app/docker-compose.yml`):
 ```
 open-testimony-app/
   api-server/           FastAPI backend (upload, auth, audit, devices)
-    migrations/         SQL migrations (001-005)
+    migrations/         SQL migrations (001-007)
     tests/              API integration tests
   bridge/               AI search bridge service
     indexing/           Frame extraction, encoding, Whisper transcription

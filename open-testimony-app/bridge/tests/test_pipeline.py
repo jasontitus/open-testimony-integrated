@@ -99,7 +99,7 @@ class TestEncodeFramesBatch:
                 torch.device("cpu"),
             )
 
-        assert embeddings.shape == (4, 768)
+        assert embeddings.shape == (4, 1280)
         assert embeddings.itemsize == 4  # float32 = 4 bytes
 
     def test_embeddings_normalized(

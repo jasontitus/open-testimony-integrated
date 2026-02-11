@@ -36,7 +36,7 @@ class TestVisualTextSearch:
                     video_id=video_uuid,
                     frame_num=i,
                     timestamp_ms=i * 2000,
-                    embedding=np.random.randn(768).tolist(),
+                    embedding=np.random.randn(1280).tolist(),
                 )
             )
         db_session.commit()
@@ -95,7 +95,7 @@ class TestVisualImageSearch:
                     video_id=uuid.UUID(vid),
                     frame_num=i,
                     timestamp_ms=i * 1000,
-                    embedding=np.random.randn(768).tolist(),
+                    embedding=np.random.randn(1280).tolist(),
                 )
             )
         db_session.commit()
