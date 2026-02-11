@@ -91,12 +91,12 @@ services:
       - JWT_SECRET_KEY=change-me-in-production-use-a-real-secret
       # Model configuration
       - VISION_MODEL_FAMILY=open_clip
-      - VISION_MODEL_NAME=ViT-L-14
-      - VISION_MODEL_PRETRAINED=datacomp_xl_s13b_b90k
+      - VISION_MODEL_NAME=ViT-L-14-336
+      - VISION_MODEL_PRETRAINED=openai
       - VISION_EMBEDDING_DIM=768
       - TRANSCRIPT_MODEL_NAME=Qwen/Qwen3-Embedding-8B
       - TRANSCRIPT_EMBEDDING_DIM=4096
-      - WHISPER_MODEL=base
+      - WHISPER_MODEL=large-v3
       - DEVICE=cpu
       - USE_FP16=false
       - FRAME_INTERVAL_SEC=2.0

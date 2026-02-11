@@ -46,12 +46,12 @@ export JWT_SECRET_KEY="change-me-in-production-use-a-real-secret"
 
 # Model configuration
 export VISION_MODEL_FAMILY="open_clip"
-export VISION_MODEL_NAME="ViT-L-14"
-export VISION_MODEL_PRETRAINED="datacomp_xl_s13b_b90k"
+export VISION_MODEL_NAME="ViT-L-14-336"
+export VISION_MODEL_PRETRAINED="openai"
 export VISION_EMBEDDING_DIM="768"
 export TRANSCRIPT_MODEL_NAME="Qwen/Qwen3-Embedding-8B"
 export TRANSCRIPT_EMBEDDING_DIM="4096"
-export WHISPER_MODEL="base"
+export WHISPER_MODEL="large-v3"
 
 # MPS GPU acceleration on Apple Silicon
 export DEVICE="mps"
