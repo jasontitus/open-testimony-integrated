@@ -7,9 +7,11 @@ A high-integrity, cross-platform mobile application and self-hosted backend for 
 ### Components
 
 - **Mobile App**: Flutter app for iOS (15.0+) and Android (API 23+)
+- **Web UI**: React dashboard for browsing, tagging, and managing testimony
 - **Backend API**: FastAPI server with cryptographic verification
+- **AI Search Bridge**: FastAPI service for AI-powered video search (OpenCLIP visual search, Whisper transcript search)
 - **Object Storage**: MinIO (S3-compatible) for video files
-- **Database**: PostgreSQL for metadata and device registry
+- **Database**: PostgreSQL with pgvector for metadata, device registry, and vector embeddings
 - **Reverse Proxy**: Nginx for TLS termination and routing
 
 ### Security Features
@@ -177,6 +179,41 @@ flutter run
 - **Device Registration**: Register device with backend
 - **About**: App version and security info
 
+## Web UI Features
+
+### Map View
+- **Interactive Map**: View all uploaded media on a Leaflet map with marker clustering
+- **Detail Panel**: Click any marker to view full video with metadata
+
+### List View
+- **Filterable List**: Search by text, filter by tags, category, media type, and source
+- **Quick Tag**: Click the tag icon on any video row to add/remove tags instantly without opening the detail panel
+- **Bulk Tagging**: Toggle "Select" mode to check multiple videos, then "Tag Selected" to apply tags to all at once
+
+### AI Search
+- **Visual Search (Text)**: Describe what you're looking for and find matching video frames using OpenCLIP embeddings
+- **Visual Search (Image)**: Upload a reference image to find visually similar frames
+- **Transcript Search (Semantic)**: Search by meaning across all transcribed audio
+- **Transcript Search (Exact)**: Find exact word matches in transcripts
+- **Quick Tag on Results**: Tag icon on each search result for instant tagging; existing tags displayed as pills
+- **Bulk Selection**: Select multiple results and tag them all at once via the sticky bottom bar
+- **Inline Playback**: Click any result to watch the video at the matched timestamp
+
+### Quick Tag System
+A fast, click-based tagging workflow available in both AI Search and List views:
+- **QuickTagMenu**: Popover showing all available tags as clickable pill toggles
+- **Instant Save**: Clicking a tag immediately saves via the API (no "Save" button needed)
+- **Optimistic Updates**: Tags update in the UI instantly, with automatic revert on API failure
+- **Filter Input**: Narrow long tag lists by typing
+- **Bulk Mode**: When multiple videos are selected, the menu shows which tags are applied to all, some, or none
+- **Role-Based**: Only visible to staff and admin users
+
+### Video Detail Panel
+- **Video/Photo Playback**: Full media player with seeking support
+- **Annotations**: Staff can edit category, location description, notes, and tags
+- **Audit Log**: View the full change history for each video
+- **Verification Status**: Cryptographic verification badges
+
 ## 🔒 How Cryptographic Verification Works
 
 ### On Mobile Device
@@ -314,9 +351,35 @@ pip install -r requirements.txt
 
 # Run locally (outside Docker)
 uvicorn main:app --reload
+```
 
-# Run tests
-pytest
+### Running Tests
+
+The project has four test suites:
+
+**API Server Unit Tests** (run inside Docker — needs database):
+```bash
+docker compose exec api pip install pytest "httpx<0.28"
+docker compose exec api python -m pytest tests/ -v
+```
+
+**Bridge Service Unit Tests** (run inside Docker — needs database + pgvector):
+```bash
+docker compose exec bridge pip install pytest "httpx<0.28"
+docker compose exec bridge python -m pytest tests/ -v
+```
+
+**Integration Tests** (run on host — hits the live API at localhost:18080):
+```bash
+pip install pytest requests
+python -m pytest tests/ -v
+```
+
+**Frontend Component Tests** (run on host):
+```bash
+cd web-ui
+npm install
+npx react-scripts test --watchAll=false --verbose
 ```
 
 ### Mobile Development
@@ -408,16 +471,19 @@ docker-compose exec -T db psql -U user opentestimony < backup_20240101.sql
 
 ## 🚧 Roadmap / Future Enhancements
 
+- [x] Add web dashboard for viewing videos
+- [x] Implement user authentication (JWT-based, role-based access control)
+- [x] Support for multiple incident tags
+- [x] Support for photo capture
+- [x] AI-powered video search (visual + transcript)
+- [x] Quick Tag workflow for fast tagging from search results and list view
+- [x] Bulk tagging for multiple videos at once
 - [ ] Implement Restic automated backups
 - [ ] Add video playback in mobile app
 - [ ] Add video sharing functionality
-- [ ] Implement user authentication
-- [ ] Add web dashboard for viewing videos
-- [ ] Support for multiple incident tags
 - [ ] Add video compression options
 - [ ] Implement batch upload for offline recordings
 - [ ] Add network quality detection
-- [ ] Support for photo capture
 - [ ] Add dark mode to mobile app
 
 ## 📄 License
