@@ -67,6 +67,10 @@ docker compose exec db psql -U user -d opentestimony \
   -f /dev/stdin < api-server/migrations/004_add_search_indexes.sql
 docker compose exec db psql -U user -d opentestimony \
   -f /dev/stdin < api-server/migrations/005_add_pgvector.sql
+docker compose exec db psql -U user -d opentestimony \
+  -f /dev/stdin < api-server/migrations/006_add_tags_table.sql
+docker compose exec db psql -U user -d opentestimony \
+  -f /dev/stdin < api-server/migrations/007_upgrade_frame_embedding_dim.sql
 ```
 
 Or use the Makefile shorthand:
@@ -107,6 +111,31 @@ Search modes available in the web UI's AI Search tab:
 - **Visual (Image)** -- upload a reference image to find similar frames
 - **Transcript (Semantic)** -- find segments by meaning, not exact words
 - **Transcript (Exact)** -- case-insensitive substring search on transcribed text
+
+### Upgrading from ViT-L-14 (768-dim)
+
+If you previously ran with the ViT-L-14 model (768-dim embeddings), follow these steps:
+
+1. **Run the dimension migration** to widen the `frame_embeddings` column from `vector(768)` to `vector(1280)`:
+
+```bash
+cd open-testimony-app
+docker compose exec db psql -U user -d opentestimony \
+  -f /dev/stdin < api-server/migrations/007_upgrade_frame_embedding_dim.sql
+```
+
+2. **Rebuild the bridge** to load the new ViT-bigG-14 model:
+
+```bash
+docker compose up -d --build bridge
+```
+
+3. **Re-index all videos** (old 768-dim embeddings are incompatible with 1280-dim queries):
+
+```bash
+curl -X POST http://localhost:18080/ai-search/indexing/reindex-all \
+  -H "Cookie: <your-jwt-cookie>"
+```
 
 ### Switching vision models
 
