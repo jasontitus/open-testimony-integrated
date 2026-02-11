@@ -46,12 +46,18 @@ export JWT_SECRET_KEY="change-me-in-production-use-a-real-secret"
 
 # Model configuration
 export VISION_MODEL_FAMILY="open_clip"
-export VISION_MODEL_NAME="ViT-bigG-14"
-export VISION_MODEL_PRETRAINED="laion2b_s39b_b160k"
-export VISION_EMBEDDING_DIM="1280"
+export VISION_MODEL_NAME="ViT-SO400M-14-SigLIP-384"
+export VISION_MODEL_PRETRAINED="webli"
+export VISION_EMBEDDING_DIM="1152"
 export TRANSCRIPT_MODEL_NAME="Qwen/Qwen3-Embedding-8B"
 export TRANSCRIPT_EMBEDDING_DIM="4096"
 export WHISPER_MODEL="large-v3"
+
+# Caption model (Qwen3-VL for frame descriptions)
+export CAPTION_MODEL_NAME="Qwen/Qwen3-VL-8B-Instruct"
+export CAPTION_ENABLED="true"
+export CAPTION_MAX_TOKENS="256"
+export CAPTION_BATCH_SIZE="1"
 
 # MPS GPU acceleration on Apple Silicon
 export DEVICE="mps"
