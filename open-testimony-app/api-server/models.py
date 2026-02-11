@@ -77,6 +77,14 @@ class AuditLog(Base):
     user_id = Column(UUID(as_uuid=True), nullable=True)
 
 
+class Tag(Base):
+    """Persistent tag definitions — survives even if no video uses a tag"""
+    __tablename__ = "tags"
+
+    name = Column(String(100), primary_key=True)
+    created_at = Column(DateTime, nullable=False)
+
+
 class User(Base):
     """Web UI users with role-based access"""
     __tablename__ = "users"

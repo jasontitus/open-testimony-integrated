@@ -12,7 +12,7 @@ function formatTimestamp(ms) {
 }
 
 export default function AISearchResultCard({
-  result, mode, onClick, availableTags, tagCounts, onVideoTagsChanged,
+  result, mode, onClick, availableTags, tagCounts, onVideoTagsChanged, onCategoryChanged,
   selectable, selected, onToggleSelect,
 }) {
   const { user } = useAuth();
@@ -21,9 +21,10 @@ export default function AISearchResultCard({
   const scorePercent = score != null ? Math.round(score * 100) : null;
   const [imgError, setImgError] = useState(false);
   const [showTagMenu, setShowTagMenu] = useState(false);
-  const [localTags, setLocalTags] = useState(null); // tags fetched/saved via QuickTagMenu
+  const [localTags, setLocalTags] = useState(null);
+  const [localCategory, setLocalCategory] = useState(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
-  const tagBtnRef = useRef(null);
+  const annotateBtnRef = useRef(null);
 
   const canEdit = user?.role === 'admin' || user?.role === 'staff';
 
@@ -31,14 +32,13 @@ export default function AISearchResultCard({
     ? `/ai-search${result.thumbnail_url}`
     : null;
 
-  const handleTagButton = (e) => {
+  const handleAnnotateClick = (e) => {
     e.stopPropagation();
-    if (!showTagMenu && tagBtnRef.current) {
-      const rect = tagBtnRef.current.getBoundingClientRect();
-      // Position menu below the button, right-aligned
+    if (!showTagMenu && annotateBtnRef.current) {
+      const rect = annotateBtnRef.current.getBoundingClientRect();
       setMenuPos({
-        top: rect.bottom + 4,
-        left: Math.max(8, rect.right - 288), // 288 = w-72 (18rem)
+        top: rect.top - 4,   // position above the button
+        left: Math.max(8, rect.right - 320), // 320 = w-80
       });
     }
     setShowTagMenu(prev => !prev);
@@ -49,19 +49,24 @@ export default function AISearchResultCard({
     onVideoTagsChanged?.(videoId, newTags);
   };
 
+  const handleCategoryChanged = (videoId, newCat) => {
+    setLocalCategory(newCat);
+    onCategoryChanged?.(videoId, newCat);
+  };
+
   const handleCheckbox = (e) => {
     e.stopPropagation();
     onToggleSelect?.(result);
   };
 
   const displayTags = localTags || result.incident_tags || null;
+  const displayCategory = localCategory ?? result.category ?? null;
 
   return (
     <div
-      onClick={() => onClick(result)}
-      className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden cursor-pointer hover:border-blue-500 hover:bg-gray-750 transition relative"
+      className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden hover:border-blue-500 transition relative"
     >
-      <div className="flex">
+      <div className="flex cursor-pointer" onClick={() => onClick(result)}>
         {/* Checkbox for bulk select */}
         {selectable && (
           <button
@@ -109,32 +114,20 @@ export default function AISearchResultCard({
                 {result.video_id.slice(0, 8)}...
               </span>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              {canEdit && (
-                <button
-                  ref={tagBtnRef}
-                  onClick={handleTagButton}
-                  className="p-1.5 rounded hover:bg-gray-700 transition text-gray-400 hover:text-blue-400"
-                  title="Quick Tag"
-                >
-                  <Tag size={18} />
-                </button>
-              )}
-              {scorePercent != null && (
-                <div className="flex items-center gap-2">
-                  <div className="w-12 h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${scorePercent}%`,
-                        backgroundColor: scorePercent > 70 ? '#22c55e' : scorePercent > 40 ? '#eab308' : '#ef4444',
-                      }}
-                    />
-                  </div>
-                  <span className="text-[10px] font-mono text-gray-400">{scorePercent}%</span>
+            {scorePercent != null && (
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="w-12 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${scorePercent}%`,
+                      backgroundColor: scorePercent > 70 ? '#22c55e' : scorePercent > 40 ? '#eab308' : '#ef4444',
+                    }}
+                  />
                 </div>
-              )}
-            </div>
+                <span className="text-[10px] font-mono text-gray-400">{scorePercent}%</span>
+              </div>
+            )}
           </div>
 
           {/* Timestamp */}
@@ -154,10 +147,15 @@ export default function AISearchResultCard({
             </p>
           )}
 
-          {/* Tag pills */}
-          {displayTags && displayTags.length > 0 && (
+          {/* Category + Tag pills */}
+          {(displayCategory || (displayTags && displayTags.length > 0)) && (
             <div className="flex flex-wrap gap-1 mt-1.5">
-              {displayTags.map(tag => (
+              {displayCategory && (
+                <span className="px-1.5 py-0.5 bg-amber-900/20 border border-amber-500/30 rounded-full text-[10px] text-amber-300">
+                  {displayCategory}
+                </span>
+              )}
+              {displayTags && displayTags.map(tag => (
                 <span
                   key={tag}
                   className="px-1.5 py-0.5 bg-blue-900/20 border border-blue-500/30 rounded-full text-[10px] text-blue-300"
@@ -170,11 +168,27 @@ export default function AISearchResultCard({
         </div>
       </div>
 
+      {/* Annotate button — full-width bar at bottom */}
+      {canEdit && (
+        <button
+          ref={annotateBtnRef}
+          onClick={handleAnnotateClick}
+          className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold border-t transition ${
+            showTagMenu
+              ? 'bg-blue-600 border-blue-500 text-white'
+              : 'bg-gray-700 border-gray-600 text-gray-200 hover:bg-blue-600 hover:border-blue-500 hover:text-white'
+          }`}
+        >
+          <Tag size={12} />
+          Annotate
+        </button>
+      )}
+
       {/* QuickTagMenu popover — rendered via portal to escape overflow-hidden */}
       {showTagMenu && canEdit && createPortal(
         <div
           className="fixed z-[9999]"
-          style={{ top: menuPos.top, left: menuPos.left }}
+          style={{ top: menuPos.top, left: menuPos.left, transform: 'translateY(-100%)' }}
           onClick={e => e.stopPropagation()}
         >
           <QuickTagMenu
@@ -183,6 +197,7 @@ export default function AISearchResultCard({
             tagCounts={tagCounts}
             onClose={() => setShowTagMenu(false)}
             onTagsChanged={handleTagsChanged}
+            onCategoryChanged={handleCategoryChanged}
           />
         </div>,
         document.body

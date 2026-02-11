@@ -26,7 +26,7 @@ import httpx
 from sqlalchemy import func as sa_func, or_
 
 from database import engine, Base, get_db
-from models import Video, Device, AuditLog, User
+from models import Video, Device, AuditLog, User, Tag
 from minio_client import get_minio_client, ensure_bucket_exists
 from config import settings
 import audit_service
@@ -89,7 +89,7 @@ async def startup_event():
         finally:
             db.close()
 
-    # Load default tags from config file
+    # Load default tags from config file and seed the tags table
     global _default_tags
     tags_path = os.path.join(os.path.dirname(__file__), settings.DEFAULT_TAGS_FILE)
     if os.path.exists(tags_path):
@@ -98,6 +98,21 @@ async def startup_event():
         logger.info(f"Loaded {len(_default_tags)} default tags")
     else:
         logger.warning(f"Default tags file not found: {tags_path}")
+
+    from database import SessionLocal
+    db_seed = SessionLocal()
+    try:
+        existing = {t.name for t in db_seed.query(Tag).all()}
+        added = 0
+        for tag_name in _default_tags:
+            if tag_name not in existing:
+                db_seed.add(Tag(name=tag_name, created_at=datetime.utcnow()))
+                added += 1
+        if added:
+            db_seed.commit()
+            logger.info(f"Seeded {added} default tags into tags table")
+    finally:
+        db_seed.close()
 
     logger.info("Open Testimony API Server started successfully")
 
@@ -125,17 +140,21 @@ async def health_check():
 
 @app.get("/tags")
 async def get_tags(db: Session = Depends(get_db)):
-    """Return all available tags: defaults merged with user-created tags from the database."""
+    """Return all available tags: tags table merged with any tags found on videos."""
+    # Tags from the persistent tags table
+    table_tags = [t.name for t in db.query(Tag).order_by(Tag.created_at).all()]
+
+    # Tags found on videos (catches any that slipped past the table)
     rows = (
         db.query(sa_func.unnest(Video.incident_tags))
         .filter(Video.deleted_at == None)
         .distinct()
         .all()
     )
-    db_tags = [row[0] for row in rows if row[0]]
+    video_tags = [row[0] for row in rows if row[0]]
 
-    # Merge and deduplicate, preserving default tags order first
-    all_tags = list(dict.fromkeys(_default_tags + db_tags))
+    # Merge and deduplicate, preserving tags table order first
+    all_tags = list(dict.fromkeys(table_tags + video_tags))
 
     return {
         "default_tags": _default_tags,
@@ -159,6 +178,30 @@ async def get_tag_counts(db: Session = Depends(get_db)):
     return {
         "tags": [{"tag": row.tag, "count": row.cnt} for row in rows if row.tag]
     }
+
+
+class CreateTagRequest(BaseModel):
+    tag: str
+
+
+@app.post("/tags")
+async def create_tag(
+    body: CreateTagRequest,
+    staff: User = Depends(require_staff),
+    db: Session = Depends(get_db),
+):
+    """Staff/admin creates a new tag that persists in the database."""
+    tag = body.tag.strip().lower()
+    if not tag:
+        raise HTTPException(status_code=400, detail="Tag cannot be empty")
+
+    existing = db.query(Tag).filter(Tag.name == tag).first()
+    if existing:
+        return {"status": "exists", "tag": tag}
+
+    db.add(Tag(name=tag, created_at=datetime.utcnow()))
+    db.commit()
+    return {"status": "created", "tag": tag}
 
 
 @app.get("/categories/counts")
@@ -1278,6 +1321,8 @@ async def delete_tag(
             v.incident_tags = [t for t in v.incident_tags if t != tag]
             count += 1
 
+    # Also remove from the tags table
+    db.query(Tag).filter(Tag.name == tag).delete()
     db.commit()
 
     audit_service.log_event(

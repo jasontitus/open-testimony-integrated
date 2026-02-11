@@ -6,11 +6,9 @@ import { useAuth } from '../auth';
 import VerificationBadge from './VerificationBadge';
 import SourceBadge from './SourceBadge';
 import MediaTypeBadge from './MediaTypeBadge';
-import TagInput from './TagInput';
+import QuickTagMenu from './QuickTagMenu';
 
-const CATEGORIES = ['', 'interview', 'incident', 'documentation', 'other'];
-
-export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated, initialTimestampMs, availableTags: availableTagsProp }) {
+export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated, initialTimestampMs, availableTags: availableTagsProp, tagCounts, onVideoTagsChanged }) {
   const { user } = useAuth();
   const [detail, setDetail] = useState(null);
   const [videoUrl, setVideoUrl] = useState(null);
@@ -86,12 +84,10 @@ export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated
 
   const d = detail || video;
 
-  // Check if any editable field has changed
+  // Check if any editable field has changed (category and tags save immediately)
   const hasChanges = detail && (
-    category !== (detail.category || '') ||
     locationDescription !== (detail.location_description || '') ||
-    notes !== (detail.notes || '') ||
-    JSON.stringify(tags) !== JSON.stringify(detail.incident_tags || [])
+    notes !== (detail.notes || '')
   );
 
   const handleSave = async () => {
@@ -184,29 +180,24 @@ export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated
               <div className="p-3 bg-red-900/30 border border-red-500/50 rounded-lg text-sm text-red-400">{saveError}</div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Category</label>
-                <select
-                  value={category}
-                  onChange={e => setCategory(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
-                >
-                  {CATEGORIES.map(c => (
-                    <option key={c} value={c}>{c || '(none)'}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Location Description</label>
-                <input
-                  type="text"
-                  value={locationDescription}
-                  onChange={e => setLocationDescription(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-blue-500"
-                  placeholder="e.g. Downtown near City Hall"
-                />
-              </div>
+            <div>
+              <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Category</label>
+              <QuickTagMenu
+                inline
+                videoIds={[video.id]}
+                availableTags={availableTags || []}
+                tagCounts={tagCounts}
+                onClose={() => {}}
+                onTagsChanged={(videoId, newTags) => {
+                  setTags(newTags);
+                  setDetail(prev => prev ? { ...prev, incident_tags: newTags } : prev);
+                  onVideoTagsChanged?.(videoId, newTags);
+                }}
+                onCategoryChanged={(videoId, newCat) => {
+                  setCategory(newCat);
+                  setDetail(prev => prev ? { ...prev, category: newCat } : prev);
+                }}
+              />
             </div>
 
             <div>
@@ -221,12 +212,13 @@ export default function VideoDetailPanel({ video, onVideoDeleted, onVideoUpdated
             </div>
 
             <div>
-              <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Incident Tags</label>
-              <TagInput
-                tags={tags}
-                onChange={setTags}
-                availableTags={availableTags}
-                placeholder="e.g. protest, arrest, traffic-stop"
+              <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Location Description</label>
+              <input
+                type="text"
+                value={locationDescription}
+                onChange={e => setLocationDescription(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-blue-500"
+                placeholder="e.g. Downtown near City Hall"
               />
             </div>
 

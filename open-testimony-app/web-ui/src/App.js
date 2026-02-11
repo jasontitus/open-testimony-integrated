@@ -49,14 +49,31 @@ function AuthGate() {
 
 const emptyFilters = { search: '', tags: [], category: '', mediaType: '', source: '' };
 
+const VALID_HASHES = ['map', 'list', 'ai-search', 'admin'];
+
+function readHash() {
+  const raw = window.location.hash.replace('#', '');
+  const hash = VALID_HASHES.includes(raw) ? raw : 'map';
+  return {
+    viewMode: hash === 'admin' ? 'map' : hash,
+    showAdmin: hash === 'admin',
+  };
+}
+
+function navigate(hash) {
+  window.history.pushState(null, '', '#' + hash);
+  return readHash();
+}
+
 function Dashboard() {
+  const initial = readHash();
   const [videos, setVideos] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [initialTimestampMs, setInitialTimestampMs] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState('map');
-  const [showAdmin, setShowAdmin] = useState(false);
+  const [viewMode, setViewMode] = useState(initial.viewMode);
+  const [showAdmin, setShowAdmin] = useState(initial.showAdmin);
   const [filters, setFilters] = useState(emptyFilters);
   const [tagCounts, setTagCounts] = useState([]);
   const [categoryCounts, setCategoryCounts] = useState([]);
@@ -100,6 +117,16 @@ function Dashboard() {
 
   useEffect(() => { fetchVideos(); }, [fetchVideos]);
   useEffect(() => { fetchCounts(); }, [fetchCounts]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const { viewMode: vm, showAdmin: sa } = readHash();
+      setViewMode(vm);
+      setShowAdmin(sa);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   const handleFiltersChange = (newFilters) => {
     setFilters(newFilters);
@@ -150,7 +177,9 @@ function Dashboard() {
     setInitialTimestampMs(result.timestamp_ms || result.start_ms || null);
     // Switch to list view to show the detail panel
     if (viewMode === 'ai-search') {
-      setViewMode('list');
+      const { viewMode: vm, showAdmin: sa } = navigate('list');
+      setViewMode(vm);
+      setShowAdmin(sa);
     }
   };
 
@@ -159,16 +188,20 @@ function Dashboard() {
       <Header
         viewMode={viewMode}
         setViewMode={(mode) => {
-          setViewMode(mode);
+          const { viewMode: vm, showAdmin: sa } = navigate(mode);
+          setViewMode(vm);
+          setShowAdmin(sa);
           if (mode === 'ai-search') {
-            setShowAdmin(false);
             setSelectedVideo(null);
             setInitialTimestampMs(null);
           }
         }}
         showAdmin={showAdmin}
         onToggleAdmin={() => {
-          setShowAdmin(!showAdmin);
+          const hash = showAdmin ? 'map' : 'admin';
+          const { viewMode: vm, showAdmin: sa } = navigate(hash);
+          setViewMode(vm);
+          setShowAdmin(sa);
           if (!showAdmin) {
             setSelectedVideo(null);
             setInitialTimestampMs(null);
@@ -236,6 +269,8 @@ function Dashboard() {
                           onVideoUpdated={handleVideoUpdated}
                           initialTimestampMs={initialTimestampMs}
                           availableTags={availableTags}
+                          tagCounts={tagCounts}
+                          onVideoTagsChanged={handleVideoTagsChanged}
                         />
                       </div>
                     </div>
@@ -248,6 +283,8 @@ function Dashboard() {
                   onVideoUpdated={handleVideoUpdated}
                   initialTimestampMs={initialTimestampMs}
                   availableTags={availableTags}
+                  tagCounts={tagCounts}
+                  onVideoTagsChanged={handleVideoTagsChanged}
                 />
               )}
             </div>

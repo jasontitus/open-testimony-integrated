@@ -1,42 +1,59 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X } from 'lucide-react';
+import { X, Plus } from 'lucide-react';
 import api from '../api';
 
+const CATEGORIES = ['interview', 'incident', 'documentation', 'other'];
+
 /**
- * QuickTagMenu — popover showing all available tags as clickable chip toggles.
+ * QuickTagMenu — shows category radio-chips and tag toggle-chips.
  *
  * Props:
- *   videoIds        – array of video IDs to tag (single or bulk)
- *   availableTags   – array of all known tag strings
- *   tagCounts       – [{tag, count}] from /tags/counts (optional, for sorting)
- *   anchorEl        – DOM element to position near (unused for now; we position via CSS)
- *   onClose         – called when the menu should close
- *   onTagsChanged   – (videoId, newTags) => void, called after each successful save
+ *   videoIds          – array of video IDs to tag (single or bulk)
+ *   availableTags     – array of all known tag strings
+ *   tagCounts         – [{tag, count}] from /tags/counts (optional, for sorting)
+ *   onClose           – called when the menu should close
+ *   onTagsChanged     – (videoId, newTags) => void, called after each successful tag save
+ *   onCategoryChanged – (videoId, newCategory) => void, called after each successful category save
+ *   inline            – if true, renders without popover chrome (header, click-outside)
  */
-export default function QuickTagMenu({ videoIds, availableTags, tagCounts, onClose, onTagsChanged }) {
+export default function QuickTagMenu({ videoIds, availableTags, tagCounts, onClose, onTagsChanged, onCategoryChanged, inline }) {
   const [filter, setFilter] = useState('');
-  const [tagsByVideo, setTagsByVideo] = useState({});  // { videoId: [...tags] }
+  const [tagsByVideo, setTagsByVideo] = useState({});    // { videoId: [...tags] }
+  const [categoryByVideo, setCategoryByVideo] = useState({}); // { videoId: 'category' }
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState({});             // { videoId: true }
+  const [saving, setSaving] = useState({});               // { videoId: true }
+  const [localTags, setLocalTags] = useState([]);          // newly created tags this session
+  const [creating, setCreating] = useState(false);
   const menuRef = useRef(null);
   const filterRef = useRef(null);
 
-  // Fetch current tags for each video on open
+  const isBulk = videoIds.length > 1;
+
+  // Merge availableTags with any tags created this session
+  const allTags = React.useMemo(() => {
+    return [...new Set([...availableTags, ...localTags])];
+  }, [availableTags, localTags]);
+
+  // Fetch current tags + category for each video on open
   useEffect(() => {
     let cancelled = false;
     async function fetchAll() {
       setLoading(true);
-      const result = {};
+      const tagResult = {};
+      const catResult = {};
       await Promise.all(videoIds.map(async (id) => {
         try {
           const res = await api.get(`/videos/${id}`);
-          result[id] = res.data.incident_tags || [];
+          tagResult[id] = res.data.incident_tags || [];
+          catResult[id] = res.data.category || '';
         } catch {
-          result[id] = [];
+          tagResult[id] = [];
+          catResult[id] = '';
         }
       }));
       if (!cancelled) {
-        setTagsByVideo(result);
+        setTagsByVideo(tagResult);
+        setCategoryByVideo(catResult);
         setLoading(false);
       }
     }
@@ -44,13 +61,14 @@ export default function QuickTagMenu({ videoIds, availableTags, tagCounts, onClo
     return () => { cancelled = true; };
   }, [videoIds]);
 
-  // Focus filter input on mount
+  // Focus filter input on mount (popover only — inline steals focus from other fields)
   useEffect(() => {
-    filterRef.current?.focus();
-  }, [loading]);
+    if (!inline) filterRef.current?.focus();
+  }, [loading, inline]);
 
-  // Click outside to close
+  // Click outside to close (popover only)
   useEffect(() => {
+    if (inline) return;
     const handler = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
         onClose();
@@ -58,32 +76,36 @@ export default function QuickTagMenu({ videoIds, availableTags, tagCounts, onClo
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [onClose]);
+  }, [onClose, inline]);
 
-  // Escape to close
+  // Escape to close (popover only)
   useEffect(() => {
+    if (inline) return;
     const handler = (e) => {
       if (e.key === 'Escape') onClose();
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
+  }, [onClose, inline]);
 
   // Sort tags: most-used first (by tagCounts), then alphabetical
   const sortedTags = React.useMemo(() => {
     const countMap = {};
     (tagCounts || []).forEach(tc => { countMap[tc.tag] = tc.count; });
-    return [...availableTags].sort((a, b) => {
+    return [...allTags].sort((a, b) => {
       const ca = countMap[a] || 0;
       const cb = countMap[b] || 0;
       if (cb !== ca) return cb - ca;
       return a.localeCompare(b);
     });
-  }, [availableTags, tagCounts]);
+  }, [allTags, tagCounts]);
 
   const filteredTags = filter.trim()
     ? sortedTags.filter(t => t.toLowerCase().includes(filter.toLowerCase()))
     : sortedTags;
+
+  // Does the current filter text exactly match an existing tag?
+  const filterMatchesExisting = allTags.some(t => t.toLowerCase() === filter.trim().toLowerCase());
 
   // Is a tag active on ALL selected videos?
   const isTagActive = useCallback((tag) => {
@@ -126,15 +148,10 @@ export default function QuickTagMenu({ videoIds, availableTags, tagCounts, onClo
         });
         onTagsChanged?.(id, updates[id]);
       } catch {
-        // Revert on error
-        setTagsByVideo(prev => {
-          const reverted = { ...prev };
-          // Re-fetch
-          api.get(`/videos/${id}`).then(res => {
-            setTagsByVideo(p => ({ ...p, [id]: res.data.incident_tags || [] }));
-          }).catch(() => {});
-          return reverted;
-        });
+        // Revert on error — re-fetch
+        api.get(`/videos/${id}`).then(res => {
+          setTagsByVideo(p => ({ ...p, [id]: res.data.incident_tags || [] }));
+        }).catch(() => {});
       }
     }));
 
@@ -143,44 +160,145 @@ export default function QuickTagMenu({ videoIds, availableTags, tagCounts, onClo
     setSaving(prev => ({ ...prev, ...unsaving }));
   };
 
-  const isBulk = videoIds.length > 1;
+  const setCategory = async (cat) => {
+    // Toggle off if already selected (for single video)
+    const newCat = (!isBulk && categoryByVideo[videoIds[0]] === cat) ? '' : cat;
+
+    // Optimistic update
+    const catUpdates = {};
+    videoIds.forEach(id => { catUpdates[id] = newCat; });
+    setCategoryByVideo(prev => ({ ...prev, ...catUpdates }));
+
+    const savingState = {};
+    videoIds.forEach(id => { savingState[id] = true; });
+    setSaving(prev => ({ ...prev, ...savingState }));
+
+    await Promise.all(videoIds.map(async (id) => {
+      try {
+        await api.put(`/videos/${id}/annotations/web`, { category: newCat });
+        onCategoryChanged?.(id, newCat);
+      } catch {
+        api.get(`/videos/${id}`).then(res => {
+          setCategoryByVideo(p => ({ ...p, [id]: res.data.category || '' }));
+        }).catch(() => {});
+      }
+    }));
+
+    const unsaving = {};
+    videoIds.forEach(id => { unsaving[id] = false; });
+    setSaving(prev => ({ ...prev, ...unsaving }));
+  };
+
+  const handleCreateTag = async () => {
+    const tag = filter.trim().toLowerCase();
+    if (!tag || filterMatchesExisting) return;
+
+    setCreating(true);
+    try {
+      await api.post('/tags', { tag });
+      setLocalTags(prev => [...prev, tag]);
+      setFilter('');
+      // Auto-toggle the new tag on for all selected videos
+      await toggleTag(tag);
+    } catch {
+      // ignore — tag might already exist
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleFilterKeyDown = (e) => {
+    if (e.key === 'Enter' && filter.trim() && !filterMatchesExisting) {
+      e.preventDefault();
+      handleCreateTag();
+    }
+  };
+
   const anySaving = Object.values(saving).some(Boolean);
+
+  // Category state for display
+  const currentCategory = !isBulk ? (categoryByVideo[videoIds[0]] || '') : '';
 
   return (
     <div
       ref={menuRef}
-      className="w-72 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl overflow-hidden"
+      className={inline
+        ? 'overflow-hidden'
+        : 'w-80 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl overflow-hidden'}
       onClick={e => e.stopPropagation()}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700">
-        <span className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
-          {isBulk ? `Tag ${videoIds.length} videos` : 'Quick Tag'}
-        </span>
-        <button onClick={onClose} className="text-gray-500 hover:text-white transition">
-          <X size={14} />
-        </button>
-      </div>
+      {/* Header (popover only) */}
+      {!inline && (
+        <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700">
+          <span className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
+            {isBulk ? `Annotate ${videoIds.length} videos` : 'Quick Annotate'}
+          </span>
+          <button onClick={onClose} className="text-gray-500 hover:text-white transition">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
-      {/* Filter */}
-      <div className="px-3 py-2 border-b border-gray-700">
-        <input
-          ref={filterRef}
-          type="text"
-          value={filter}
-          onChange={e => setFilter(e.target.value)}
-          placeholder="Filter tags..."
-          className="w-full px-2 py-1 bg-gray-900 border border-gray-700 rounded text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
-        />
+      {/* Category chips */}
+      {!loading && (
+        <div className={inline ? 'mb-3' : 'px-3 py-2 border-b border-gray-700'}>
+          {!inline && <p className="text-[10px] text-gray-500 uppercase font-bold mb-1.5">Category</p>}
+          <div className="flex flex-wrap gap-1.5">
+            {CATEGORIES.map(cat => {
+              const active = !isBulk && currentCategory === cat;
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setCategory(cat)}
+                  disabled={anySaving}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition border ${
+                    active
+                      ? 'bg-amber-600 border-amber-500 text-white'
+                      : 'bg-gray-900 border-gray-600 text-gray-400 hover:border-gray-500 hover:text-gray-300'
+                  } ${anySaving ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
+                >
+                  {cat}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Filter / create */}
+      <div className={inline ? 'mb-2' : 'px-3 py-2 border-b border-gray-700'}>
+        {!inline && <p className="text-[10px] text-gray-500 uppercase font-bold mb-1.5">Tags</p>}
+        <div className="flex gap-1">
+          <input
+            ref={filterRef}
+            type="text"
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            onKeyDown={handleFilterKeyDown}
+            placeholder="Filter or create tag..."
+            className="flex-1 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
+          />
+          {filter.trim() && !filterMatchesExisting && (
+            <button
+              onClick={handleCreateTag}
+              disabled={creating || anySaving}
+              className="px-2 py-1 bg-green-700 hover:bg-green-600 disabled:bg-green-900 text-white text-xs rounded transition flex items-center gap-1 shrink-0"
+              title="Create new tag"
+            >
+              <Plus size={12} />
+              Add
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tag list */}
-      <div className="max-h-56 overflow-y-auto p-2">
+      <div className={inline ? '' : 'max-h-56 overflow-y-auto p-2'}>
         {loading ? (
           <div className="flex justify-center py-4">
             <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
           </div>
-        ) : filteredTags.length === 0 ? (
+        ) : filteredTags.length === 0 && !filter.trim() ? (
           <p className="text-xs text-gray-500 text-center py-3">No tags found</p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
@@ -204,6 +322,9 @@ export default function QuickTagMenu({ videoIds, availableTags, tagCounts, onClo
                 </button>
               );
             })}
+            {filter.trim() && !filterMatchesExisting && filteredTags.length === 0 && (
+              <p className="text-xs text-gray-500 py-1">Press Enter or click Add to create "{filter.trim().toLowerCase()}"</p>
+            )}
           </div>
         )}
       </div>
