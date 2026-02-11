@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
@@ -277,6 +278,33 @@ async def reindex_all(
     db.commit()
 
     return {"status": "reindex_all_queued", "count": len(jobs)}
+
+
+# --- Thumbnail serving ---
+
+
+@app.get("/thumbnails/{video_id}/{timestamp_ms}.jpg")
+async def get_thumbnail(video_id: str, timestamp_ms: int):
+    """Serve a thumbnail image for a video frame.
+    Falls back to nearest available thumbnail if exact match not found."""
+    import os
+    import glob
+
+    thumb_dir = f"/data/thumbnails/{video_id}"
+    exact = os.path.join(thumb_dir, f"{timestamp_ms}.jpg")
+    if os.path.exists(exact):
+        return FileResponse(exact, media_type="image/jpeg")
+
+    # Fallback: find nearest available thumbnail
+    if os.path.isdir(thumb_dir):
+        available = glob.glob(os.path.join(thumb_dir, "*.jpg"))
+        if available:
+            def ts_from_path(p):
+                return int(os.path.basename(p).replace(".jpg", ""))
+            nearest = min(available, key=lambda p: abs(ts_from_path(p) - timestamp_ms))
+            return FileResponse(nearest, media_type="image/jpeg")
+
+    raise HTTPException(status_code=404, detail="Thumbnail not found")
 
 
 # --- Search endpoints (from search router) ---

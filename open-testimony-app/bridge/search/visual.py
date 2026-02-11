@@ -78,10 +78,12 @@ def search_visual(query_embedding: list[float], db: Session, limit: int = 20):
 
     rows = []
     for row in result:
+        vid = str(row.video_id)
         rows.append({
-            "video_id": str(row.video_id),
+            "video_id": vid,
             "timestamp_ms": row.timestamp_ms,
             "frame_num": row.frame_num,
             "score": float(row.score),
+            "thumbnail_url": f"/thumbnails/{vid}/{row.timestamp_ms}.jpg",
         })
     return rows

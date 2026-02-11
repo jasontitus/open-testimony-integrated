@@ -46,12 +46,14 @@ def search_transcript_semantic(
 
     rows = []
     for row in result:
+        vid = str(row.video_id)
         rows.append({
-            "video_id": str(row.video_id),
+            "video_id": vid,
             "segment_text": row.segment_text,
             "start_ms": row.start_ms,
             "end_ms": row.end_ms,
             "score": float(row.score),
+            "thumbnail_url": f"/thumbnails/{vid}/{row.start_ms}.jpg",
         })
     return rows
 
@@ -74,10 +76,12 @@ def search_transcript_exact(query: str, db: Session, limit: int = 20):
 
     rows = []
     for row in result:
+        vid = str(row.video_id)
         rows.append({
-            "video_id": str(row.video_id),
+            "video_id": vid,
             "segment_text": row.segment_text,
             "start_ms": row.start_ms,
             "end_ms": row.end_ms,
+            "thumbnail_url": f"/thumbnails/{vid}/{row.start_ms}.jpg",
         })
     return rows

@@ -17,11 +17,12 @@ from minio_utils import download_video
 logger = logging.getLogger(__name__)
 
 
-def extract_frames(video_path: str, interval_sec: float = 2.0):
+def extract_frames(video_path: str, interval_sec: float = 2.0, video_id_for_thumbs=None):
     """Extract frames from a video at a given interval.
 
     Yields (frame_num, timestamp_ms, pil_image) tuples.
     Skips dark/black frames (mean brightness < 15).
+    Saves thumbnails to /data/thumbnails/{video_id}/ when video_id_for_thumbs is provided.
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -49,6 +50,16 @@ def extract_frames(video_path: str, interval_sec: float = 2.0):
                 continue
 
             timestamp_ms = int((frame_idx / fps) * 1000)
+
+            # Save thumbnail JPEG for search result previews
+            if video_id_for_thumbs:
+                thumb_dir = os.path.join("/data/thumbnails", str(video_id_for_thumbs))
+                os.makedirs(thumb_dir, exist_ok=True)
+                thumb_path = os.path.join(thumb_dir, f"{timestamp_ms}.jpg")
+                pil_img.resize((320, int(320 * pil_img.height / pil_img.width))).save(
+                    thumb_path, "JPEG", quality=75
+                )
+
             yield (extracted, timestamp_ms, pil_img)
             extracted += 1
 
@@ -154,7 +165,7 @@ def index_video(video_id: str, object_name: str, db: Session):
         frame_meta = []
 
         for frame_num, timestamp_ms, pil_img in extract_frames(
-            local_path, settings.FRAME_INTERVAL_SEC
+            local_path, settings.FRAME_INTERVAL_SEC, video_id_for_thumbs=video_id
         ):
             frame_batch.append(pil_img)
             frame_meta.append((frame_num, timestamp_ms))
