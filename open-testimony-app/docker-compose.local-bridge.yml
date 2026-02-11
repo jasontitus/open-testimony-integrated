@@ -1,0 +1,36 @@
+# Override: run the bridge service natively on macOS for MPS GPU acceleration.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.local-bridge.yml up -d
+#   ./bridge/run-local.sh
+#
+# This file:
+#   - Disables the Docker bridge container (replicas: 0)
+#   - Points nginx to the native bridge on host.docker.internal:8003
+#   - Points API's BRIDGE_URL to the native bridge
+
+services:
+  bridge:
+    deploy:
+      replicas: 0
+
+  nginx:
+    volumes:
+      - ./nginx/conf-local-bridge:/etc/nginx/conf.d
+      - ./nginx/certs:/etc/letsencrypt
+      - ./nginx/html:/var/www/html
+
+  api:
+    environment:
+      - DATABASE_URL=postgresql://user:pass@db:5432/opentestimony
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=admin
+      - MINIO_SECRET_KEY=supersecret
+      - MINIO_EXTERNAL_ENDPOINT=opentestimony.ngrok.app/video-stream
+      - MINIO_EXTERNAL_SCHEME=https
+      - MINIO_BUCKET=opentestimony-videos
+      - JWT_SECRET_KEY=change-me-in-production-use-a-real-secret
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin
+      - ADMIN_DISPLAY_NAME=Administrator
+      - BRIDGE_URL=http://host.docker.internal:8003

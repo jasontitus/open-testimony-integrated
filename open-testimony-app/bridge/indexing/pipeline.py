@@ -53,7 +53,7 @@ def extract_frames(video_path: str, interval_sec: float = 2.0, video_id_for_thum
 
             # Save thumbnail JPEG for search result previews
             if video_id_for_thumbs:
-                thumb_dir = os.path.join("/data/thumbnails", str(video_id_for_thumbs))
+                thumb_dir = os.path.join(settings.THUMBNAIL_DIR, str(video_id_for_thumbs))
                 os.makedirs(thumb_dir, exist_ok=True)
                 thumb_path = os.path.join(thumb_dir, f"{timestamp_ms}.jpg")
                 pil_img.resize((320, int(320 * pil_img.height / pil_img.width))).save(

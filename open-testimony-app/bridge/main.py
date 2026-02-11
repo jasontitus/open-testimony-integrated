@@ -290,7 +290,7 @@ async def get_thumbnail(video_id: str, timestamp_ms: int):
     import os
     import glob
 
-    thumb_dir = f"/data/thumbnails/{video_id}"
+    thumb_dir = os.path.join(settings.THUMBNAIL_DIR, video_id)
     exact = os.path.join(thumb_dir, f"{timestamp_ms}.jpg")
     if os.path.exists(exact):
         return FileResponse(exact, media_type="image/jpeg")

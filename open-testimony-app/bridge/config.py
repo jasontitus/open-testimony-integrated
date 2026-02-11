@@ -48,6 +48,7 @@ class Settings:
     FRAME_INTERVAL_SEC: float = float(os.environ.get("FRAME_INTERVAL_SEC", "2.0"))
     BATCH_SIZE: int = int(os.environ.get("BATCH_SIZE", "16"))
     TEMP_DIR: str = os.environ.get("TEMP_DIR", "/data/temp")
+    THUMBNAIL_DIR: str = os.environ.get("THUMBNAIL_DIR", "/data/thumbnails")
 
     # Worker
     WORKER_POLL_INTERVAL: int = int(os.environ.get("WORKER_POLL_INTERVAL", "10"))
