@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
-import { UserPlus, Key, Shield, AlertCircle, Tag, Trash2, RefreshCw, Database, Upload, CheckCircle, XCircle, FileVideo, Image, Plus } from 'lucide-react';
+import { UserPlus, Key, Shield, AlertCircle, Tag, Trash2, RefreshCw, Database, Upload, CheckCircle, XCircle, FileVideo, Image, Plus, ScrollText, Download, ChevronDown, ChevronRight, Filter } from 'lucide-react';
 import axios from 'axios';
 import api from '../api';
 
@@ -80,6 +80,9 @@ export default function AdminPanel() {
 
         {/* Indexing Management */}
         <IndexingManagement />
+
+        {/* Audit Log */}
+        <AuditLogViewer />
       </div>
     </div>
   );
@@ -715,6 +718,254 @@ function IndexingManagement() {
       ) : (
         <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 text-center text-gray-500">
           Could not load indexing status
+        </div>
+      )}
+    </div>
+  );
+}
+
+const EVENT_TYPES = [
+  'upload', 'bulk_upload', 'device_register', 'annotation_update',
+  'web_annotation_update', 'video_deleted', 'tag_deleted',
+  'user_created', 'user_updated', 'password_reset',
+];
+
+const EVENT_BADGE_COLORS = {
+  upload: 'bg-green-900/30 border-green-500/50 text-green-400',
+  bulk_upload: 'bg-green-900/30 border-green-500/50 text-green-400',
+  device_register: 'bg-purple-900/30 border-purple-500/50 text-purple-400',
+  annotation_update: 'bg-blue-900/30 border-blue-500/50 text-blue-400',
+  web_annotation_update: 'bg-blue-900/30 border-blue-500/50 text-blue-400',
+  video_deleted: 'bg-red-900/30 border-red-500/50 text-red-400',
+  tag_deleted: 'bg-red-900/30 border-red-500/50 text-red-400',
+  user_created: 'bg-amber-900/30 border-amber-500/50 text-amber-400',
+  user_updated: 'bg-amber-900/30 border-amber-500/50 text-amber-400',
+  password_reset: 'bg-amber-900/30 border-amber-500/50 text-amber-400',
+};
+
+const PAGE_SIZE = 25;
+
+function AuditLogViewer() {
+  const [entries, setEntries] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [eventFilter, setEventFilter] = useState('');
+  const [expandedId, setExpandedId] = useState(null);
+
+  const [chainStatus, setChainStatus] = useState(null);
+  const [chainLoading, setChainLoading] = useState(true);
+
+  const [exporting, setExporting] = useState(false);
+
+  const fetchEntries = useCallback(async () => {
+    try {
+      setLoading(true);
+      const params = { limit: PAGE_SIZE, offset };
+      if (eventFilter) params.event_type = eventFilter;
+      const res = await api.get('/audit-log', { params });
+      setEntries(res.data.entries);
+      setTotal(res.data.total);
+    } catch (err) {
+      console.error('Failed to load audit log:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [offset, eventFilter]);
+
+  const fetchChainStatus = useCallback(async () => {
+    try {
+      setChainLoading(true);
+      const res = await api.get('/audit-log/verify');
+      setChainStatus(res.data);
+    } catch (err) {
+      console.error('Failed to verify chain:', err);
+    } finally {
+      setChainLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchChainStatus(); }, [fetchChainStatus]);
+  useEffect(() => { fetchEntries(); }, [fetchEntries]);
+
+  // Reset to page 1 when filter changes
+  const handleFilterChange = (val) => {
+    setEventFilter(val);
+    setOffset(0);
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await api.get('/export/integrity-report');
+      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `integrity-report-${format(new Date(), 'yyyy-MM-dd')}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to generate integrity report');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
+
+  return (
+    <div className="mt-8">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <ScrollText size={20} className="text-cyan-400" />
+          <h2 className="text-xl font-bold text-white">Audit Log</h2>
+          {chainLoading ? (
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-cyan-500 ml-2"></div>
+          ) : chainStatus ? (
+            <span className={`ml-2 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
+              chainStatus.valid
+                ? 'bg-green-900/30 border-green-500/50 text-green-400'
+                : 'bg-red-900/30 border-red-500/50 text-red-400'
+            }`}>
+              {chainStatus.valid ? 'Chain Valid' : 'Chain Broken'}
+            </span>
+          ) : null}
+          {chainStatus && (
+            <span className="text-xs text-gray-500 ml-1">
+              ({chainStatus.entries_checked} entries)
+            </span>
+          )}
+        </div>
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="flex items-center gap-1.5 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-cyan-800 text-white text-sm font-medium rounded-lg transition"
+        >
+          {exporting ? (
+            <RefreshCw size={14} className="animate-spin" />
+          ) : (
+            <Download size={14} />
+          )}
+          {exporting ? 'Generating...' : 'Export Report'}
+        </button>
+      </div>
+
+      {/* Filter row */}
+      <div className="flex items-center gap-2 mb-3">
+        <Filter size={14} className="text-gray-500" />
+        <select
+          value={eventFilter}
+          onChange={(e) => handleFilterChange(e.target.value)}
+          className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-300 focus:outline-none focus:border-cyan-500"
+        >
+          <option value="">All Events</option>
+          {EVENT_TYPES.map(t => (
+            <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
+          ))}
+        </select>
+        <span className="text-xs text-gray-500">{total} total entries</span>
+      </div>
+
+      {/* Table */}
+      {loading ? (
+        <div className="flex justify-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500"></div>
+        </div>
+      ) : entries.length === 0 ? (
+        <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 text-center text-gray-500">
+          No audit log entries found
+        </div>
+      ) : (
+        <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-gray-700">
+                <th className="w-8 px-2 py-3"></th>
+                <th className="text-left px-3 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Seq</th>
+                <th className="text-left px-3 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Timestamp</th>
+                <th className="text-left px-3 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Event Type</th>
+                <th className="text-left px-3 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Video ID</th>
+                <th className="text-left px-3 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">User / Device</th>
+                <th className="text-left px-3 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Entry Hash</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map(e => (
+                <React.Fragment key={e.id}>
+                  <tr
+                    className="border-b border-gray-700/50 hover:bg-gray-750 cursor-pointer"
+                    onClick={() => setExpandedId(expandedId === e.id ? null : e.id)}
+                  >
+                    <td className="px-2 py-3 text-gray-500">
+                      {expandedId === e.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </td>
+                    <td className="px-3 py-3 text-sm font-mono text-gray-400">#{e.sequence_number}</td>
+                    <td className="px-3 py-3 text-xs text-gray-400">
+                      {format(new Date(e.created_at), 'MMM d, yyyy HH:mm:ss')}
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className={`px-1.5 py-0.5 border rounded text-[10px] font-bold uppercase tracking-wider ${
+                        EVENT_BADGE_COLORS[e.event_type] || 'bg-gray-700 border-gray-600 text-gray-400'
+                      }`}>
+                        {e.event_type.replace(/_/g, ' ')}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-xs font-mono text-blue-400">
+                      {e.video_id ? e.video_id.substring(0, 8) + '...' : '-'}
+                    </td>
+                    <td className="px-3 py-3 text-xs text-gray-400 truncate max-w-[120px]">
+                      {e.device_id || e.event_data?.user_id?.substring(0, 8) || '-'}
+                    </td>
+                    <td className="px-3 py-3 text-xs font-mono text-gray-600">
+                      {e.entry_hash.substring(0, 12)}...
+                    </td>
+                  </tr>
+                  {expandedId === e.id && (
+                    <tr className="border-b border-gray-700/50">
+                      <td colSpan={7} className="px-4 py-3 bg-gray-900/50">
+                        <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Event Data</div>
+                        <pre className="text-xs text-gray-300 bg-gray-900 rounded-lg p-3 overflow-x-auto max-h-64 overflow-y-auto">
+                          {JSON.stringify(e.event_data, null, 2)}
+                        </pre>
+                        <div className="flex gap-4 mt-2 text-[10px] text-gray-600">
+                          <span>Full hash: {e.entry_hash}</span>
+                          <span>Previous: {e.previous_hash.substring(0, 16)}...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-700">
+              <button
+                onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+                disabled={offset === 0}
+                className="px-3 py-1.5 text-sm text-gray-400 hover:text-white disabled:text-gray-700 disabled:cursor-not-allowed transition"
+              >
+                Previous
+              </button>
+              <span className="text-xs text-gray-500">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                onClick={() => setOffset(offset + PAGE_SIZE)}
+                disabled={offset + PAGE_SIZE >= total}
+                className="px-3 py-1.5 text-sm text-gray-400 hover:text-white disabled:text-gray-700 disabled:cursor-not-allowed transition"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

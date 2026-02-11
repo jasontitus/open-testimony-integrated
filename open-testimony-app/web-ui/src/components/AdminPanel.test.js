@@ -34,6 +34,12 @@ beforeEach(() => {
     if (url === '/tags') {
       return Promise.resolve({ data: { all_tags: [], default_tags: [] } });
     }
+    if (url === '/audit-log') {
+      return Promise.resolve({ data: { total: 0, entries: [] } });
+    }
+    if (url === '/audit-log/verify') {
+      return Promise.resolve({ data: { valid: true, entries_checked: 0, errors: [] } });
+    }
     return Promise.resolve({ data: {} });
   });
 });

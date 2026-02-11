@@ -992,6 +992,44 @@ async def verify_audit_log(db: Session = Depends(get_db)):
     return result
 
 
+@app.get("/export/integrity-report")
+async def export_integrity_report(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Generate a full integrity report with chain verification and file fingerprints."""
+    chain_verification = audit_service.verify_chain(db)
+
+    videos = (
+        db.query(Video)
+        .filter(Video.deleted_at == None)
+        .order_by(Video.uploaded_at.asc())
+        .all()
+    )
+
+    files = [
+        {
+            "id": str(v.id),
+            "file_hash": v.file_hash,
+            "device_id": v.device_id,
+            "object_name": v.object_name,
+            "media_type": v.media_type,
+            "source": v.source,
+            "verification_status": v.verification_status,
+            "uploaded_at": v.uploaded_at.isoformat(),
+            "timestamp": v.timestamp.isoformat(),
+        }
+        for v in videos
+    ]
+
+    return {
+        "generated_at": datetime.utcnow().isoformat(),
+        "chain_verification": chain_verification,
+        "files": files,
+        "total_files": len(files),
+    }
+
+
 @app.get("/videos/{video_id}/audit")
 async def get_video_audit_trail(
     video_id: str,
