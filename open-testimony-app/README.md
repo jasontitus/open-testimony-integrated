@@ -375,31 +375,37 @@ uvicorn main:app --reload
 
 ### Running Tests
 
-The project has four test suites:
+The project includes 133 automated tests across the API server (67) and bridge service (66). A single script runs them all:
 
-**API Server Unit Tests** (run inside Docker — needs database):
 ```bash
-docker compose exec api pip install pytest "httpx<0.28"
-docker compose exec api python -m pytest tests/ -v
+# Prerequisites: Postgres must be running
+docker compose up -d db
+
+# Run all tests (~15 seconds)
+bash scripts/run-tests.sh
+
+# Run only one suite
+bash scripts/run-tests.sh api       # API server tests only
+bash scripts/run-tests.sh bridge    # Bridge service tests only
+
+# Pass extra pytest args (e.g. run a single test file or use -k filter)
+bash scripts/run-tests.sh api -k "test_queue"
+bash scripts/run-tests.sh bridge -k "test_search"
 ```
 
-**Bridge Service Unit Tests** (run inside Docker — needs database + pgvector):
+The script uses the local Postgres instance at `localhost:5432` by default. Override with:
 ```bash
-docker compose exec bridge pip install pytest "httpx<0.28"
-docker compose exec bridge python -m pytest tests/ -v
+TEST_DATABASE_URL="postgresql://user:pass@localhost:5432/mydb" bash scripts/run-tests.sh
 ```
 
-**Integration Tests** (run on host — hits the live API at localhost:18080):
+**Bridge tests** require the bridge virtualenv (`bridge/.venv`). Set it up once:
 ```bash
-pip install pytest requests
-python -m pytest tests/ -v
+cd bridge && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
 ```
 
-**Frontend Component Tests** (run on host):
+**Frontend component tests** (run separately):
 ```bash
-cd web-ui
-npm install
-npx react-scripts test --watchAll=false --verbose
+cd web-ui && npm install && npx react-scripts test --watchAll=false --verbose
 ```
 
 ### Mobile Development
