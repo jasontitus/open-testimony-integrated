@@ -226,6 +226,18 @@ def _migrate_embedding_dimensions():
             ))
             conn.commit()
 
+        # Trigram indexes for ILIKE exact-text search on captions and transcripts
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_caption_text_trgm "
+            "ON caption_embeddings USING gin (caption_text gin_trgm_ops)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_transcript_text_trgm "
+            "ON transcript_embeddings USING gin (segment_text gin_trgm_ops)"
+        ))
+        conn.commit()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -8,17 +8,80 @@ import QuickTagMenu from './QuickTagMenu';
 import AddressAutocomplete from './AddressAutocomplete';
 
 const SEARCH_MODES = [
-  { id: 'visual_text', label: 'Visual (Text)', icon: Film, description: 'Describe what you see' },
-  { id: 'visual_image', label: 'Visual (Image)', icon: Upload, description: 'Upload a reference image' },
-  { id: 'combined', label: 'Combined', icon: Eye, description: 'Visual + scene descriptions' },
+  { id: 'visual_text', label: 'Embedding', icon: Film, description: 'Describe what you see' },
+  { id: 'visual_image', label: 'Search by Image', icon: Upload, description: 'Upload a reference image' },
+  { id: 'combined', label: 'Visual', icon: Eye, description: 'Visual + scene descriptions' },
   { id: 'transcript_semantic', label: 'Transcript (Semantic)', icon: MessageSquare, description: 'Search by meaning' },
   { id: 'transcript_exact', label: 'Transcript (Exact)', icon: Search, description: 'Search exact words' },
+  { id: 'caption_exact', label: 'Caption (Exact)', icon: Search, description: 'Search exact caption phrases' },
 ];
 
 const aiApi = axios.create({
   baseURL: '/ai-search',
   withCredentials: true,
 });
+
+function SearchForm({ mode, loading, onSearch, onImageChange, imageFile }) {
+  const [inputValue, setInputValue] = useState('');
+  const searchInputRef = useRef(null);
+
+  useEffect(() => {
+    if (searchInputRef.current) searchInputRef.current.focus();
+  }, []);
+
+  // Reset input when mode changes
+  useEffect(() => {
+    setInputValue('');
+  }, [mode]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSearch(inputValue);
+  };
+
+  const placeholder =
+    mode === 'visual_text' ? 'Describe what you\'re looking for...' :
+    mode === 'combined' ? 'Search visual + scene descriptions...' :
+    mode === 'transcript_semantic' ? 'Search by meaning...' :
+    mode === 'caption_exact' ? 'Search exact caption phrases...' :
+    'Search exact words...';
+
+  return (
+    <form onSubmit={handleSubmit} className="flex gap-2">
+      {mode === 'visual_image' ? (
+        <label className="flex-1 flex items-center gap-2 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg cursor-pointer hover:border-gray-600">
+          <Upload size={16} className="text-gray-500 shrink-0" />
+          <span className="text-sm text-gray-400 truncate">
+            {imageFile ? imageFile.name : 'Choose an image...'}
+          </span>
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={e => onImageChange(e.target.files[0] || null)}
+          />
+        </label>
+      ) : (
+        <input
+          ref={searchInputRef}
+          type="text"
+          value={inputValue}
+          onChange={e => setInputValue(e.target.value)}
+          placeholder={placeholder}
+          className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-blue-500"
+        />
+      )}
+      <button
+        type="submit"
+        disabled={loading}
+        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-sm font-medium rounded-lg transition shrink-0"
+      >
+        {loading ? <Loader size={16} className="animate-spin" /> : <Search size={16} />}
+        Search
+      </button>
+    </form>
+  );
+}
 
 // --- Inline component: collapsible group of results for one video ---
 function VideoResultGroup({
@@ -29,7 +92,7 @@ function VideoResultGroup({
   const best = group.results[0];
   const count = group.results.length;
   const scorePercent = group.bestScore != null ? Math.round(group.bestScore * 100) : null;
-  const isVisual = mode === 'visual_text' || mode === 'visual_image' || mode === 'combined' || mode === 'caption_semantic';
+  const isVisual = mode === 'visual_text' || mode === 'visual_image' || mode === 'combined' || mode === 'caption_semantic' || mode === 'caption_exact';
 
   const thumbnailUrl = best.thumbnail_url ? `/ai-search${best.thumbnail_url}` : null;
   const [imgError, setImgError] = useState(false);
@@ -197,7 +260,6 @@ function VideoResultGroup({
 export default function AISearchPanel({ onResultClick, availableTags, tagCounts, onVideoTagsChanged }) {
   const { user, logout } = useAuth();
   const [mode, setMode] = useState('visual_text');
-  const [query, setQuery] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -211,12 +273,6 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
   const [videoUrl, setVideoUrl] = useState(null);
   const [videoLoading, setVideoLoading] = useState(false);
   const videoRef = useRef(null);
-  const searchInputRef = useRef(null);
-
-  // Auto-focus search input on mount
-  useEffect(() => {
-    if (searchInputRef.current) searchInputRef.current.focus();
-  }, []);
 
   // Annotation panel state
   const canEdit = user?.role === 'admin' || user?.role === 'staff';
@@ -250,20 +306,19 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
     const seen = new Map();
     for (const r of results) {
       if (!seen.has(r.video_id)) {
-        const group = { video_id: r.video_id, results: [r], bestScore: r.score ?? 0 };
+        const group = { video_id: r.video_id, results: [r], bestScore: r.score ?? null };
         seen.set(r.video_id, group);
         groups.push(group);
       } else {
         const group = seen.get(r.video_id);
         group.results.push(r);
-        if ((r.score ?? 0) > group.bestScore) group.bestScore = r.score ?? 0;
+        if (r.score != null && (group.bestScore == null || r.score > group.bestScore)) group.bestScore = r.score;
       }
     }
     return groups;
   }, [results]);
 
-  const handleSearch = async (e) => {
-    e.preventDefault();
+  const handleSearch = async (query) => {
     if (mode !== 'visual_image' && !query.trim()) return;
     if (mode === 'visual_image' && !imageFile) return;
 
@@ -289,6 +344,8 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
         res = await aiApi.get('/search/transcript', { params: { q: query, limit: 20 } });
       } else if (mode === 'transcript_exact') {
         res = await aiApi.get('/search/transcript/exact', { params: { q: query, limit: 20 } });
+      } else if (mode === 'caption_exact') {
+        res = await aiApi.get('/search/captions/exact', { params: { q: query, limit: 20 } });
       }
       const rawResults = res.data.results || [];
       setResults(rawResults);
@@ -475,44 +532,13 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
           })}
         </div>
 
-        <form onSubmit={handleSearch} className="flex gap-2">
-          {mode === 'visual_image' ? (
-            <label className="flex-1 flex items-center gap-2 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg cursor-pointer hover:border-gray-600">
-              <Upload size={16} className="text-gray-500 shrink-0" />
-              <span className="text-sm text-gray-400 truncate">
-                {imageFile ? imageFile.name : 'Choose an image...'}
-              </span>
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={e => setImageFile(e.target.files[0] || null)}
-              />
-            </label>
-          ) : (
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder={
-                mode === 'visual_text' ? 'Describe what you\'re looking for...' :
-                mode === 'combined' ? 'Search visual + scene descriptions...' :
-                mode === 'transcript_semantic' ? 'Search by meaning...' :
-                'Search exact words...'
-              }
-              className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-blue-500"
-            />
-          )}
-          <button
-            type="submit"
-            disabled={loading}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-sm font-medium rounded-lg transition shrink-0"
-          >
-            {loading ? <Loader size={16} className="animate-spin" /> : <Search size={16} />}
-            Search
-          </button>
-        </form>
+        <SearchForm
+          mode={mode}
+          loading={loading}
+          onSearch={handleSearch}
+          onImageChange={setImageFile}
+          imageFile={imageFile}
+        />
 
         {stats && (
           <div className="flex gap-3 mt-3 text-[10px] uppercase tracking-wider text-gray-500">
@@ -527,7 +553,7 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
       <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
         {/* Inline video player + annotation panel (shown when a result is clicked) */}
         {activeResult && !selectMode && (
-          <div className="md:w-1/2 lg:w-3/5 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-gray-700 overflow-y-auto">
+          <div className="max-h-[70vh] md:max-h-none md:w-1/2 lg:w-3/5 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-gray-700 overflow-y-auto">
             <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
               <span className="text-xs text-gray-400 font-mono">
                 {activeResult.video_id.slice(0, 8)}...

@@ -181,6 +181,39 @@ async def transcript_exact_search(
     }
 
 
+def _caption_exact_search(q, db, limit):
+    """Run exact caption search (no model, just DB)."""
+    from search.caption import search_captions_exact
+
+    results = search_captions_exact(q, db, limit)
+    t_search = time.time()
+    return results, t_search
+
+
+@router.get("/captions/exact")
+async def caption_exact_search(
+    q: str = Query(..., min_length=1, description="Text query for exact caption search"),
+    limit: int = Query(20, ge=1, le=100),
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Exact text search on AI-generated captions (case-insensitive)."""
+    t0 = time.time()
+    results, t_search = await asyncio.to_thread(
+        _caption_exact_search, q, db, limit
+    )
+    logger.info(f"caption_exact q={q!r}: db={t_search-t0:.3f}s")
+    return {
+        "query": q,
+        "mode": "caption_exact",
+        "timing": {
+            "search_ms": _ms(t0, t_search),
+            "total_ms": _ms(t0, t_search),
+        },
+        "results": results,
+    }
+
+
 def _caption_encode_and_search(q, db, limit):
     """Run caption encoding + DB search under the text lock."""
     from main import text_model, text_lock

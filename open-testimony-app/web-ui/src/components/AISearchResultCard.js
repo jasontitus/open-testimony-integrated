@@ -16,7 +16,7 @@ export default function AISearchResultCard({
   selectable, selected, onToggleSelect, searchTiming,
 }) {
   const { user } = useAuth();
-  const isVisual = mode === 'visual_text' || mode === 'visual_image' || mode === 'combined' || mode === 'caption_semantic';
+  const isVisual = mode === 'visual_text' || mode === 'visual_image' || mode === 'combined' || mode === 'caption_semantic' || mode === 'caption_exact';
   const score = result.score != null ? result.score : null;
   const scorePercent = score != null ? Math.round(score * 100) : null;
   const [imgError, setImgError] = useState(false);

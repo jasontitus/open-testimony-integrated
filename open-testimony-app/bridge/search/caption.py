@@ -53,3 +53,32 @@ def search_captions(query_embedding: list[float], db: Session, limit: int = 20):
             "thumbnail_url": f"/thumbnails/{vid}/{row.timestamp_ms}.jpg",
         })
     return rows
+
+
+def search_captions_exact(query: str, db: Session, limit: int = 20):
+    """Exact text search (case-insensitive ILIKE) on AI-generated captions.
+
+    Returns list of dicts with video_id, timestamp_ms, frame_num, caption_text.
+    """
+    result = db.execute(
+        text("""
+            SELECT ce.video_id, ce.timestamp_ms, ce.frame_num, ce.caption_text
+            FROM caption_embeddings ce
+            WHERE ce.caption_text ILIKE :pattern
+            ORDER BY ce.timestamp_ms
+            LIMIT :lim
+        """),
+        {"pattern": f"%{query}%", "lim": limit},
+    )
+
+    rows = []
+    for row in result:
+        vid = str(row.video_id)
+        rows.append({
+            "video_id": vid,
+            "timestamp_ms": row.timestamp_ms,
+            "frame_num": row.frame_num,
+            "caption_text": row.caption_text,
+            "thumbnail_url": f"/thumbnails/{vid}/{row.timestamp_ms}.jpg",
+        })
+    return rows
