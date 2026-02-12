@@ -9,6 +9,7 @@ import MapView from './components/MapView';
 import VideoDetailPanel from './components/VideoDetailPanel';
 import AdminPanel from './components/AdminPanel';
 import AISearchPanel from './components/AISearchPanel';
+import QueuePanel from './components/QueuePanel';
 
 // Fix for Leaflet marker icons in React
 import L from 'leaflet';
@@ -49,7 +50,7 @@ function AuthGate() {
 
 const emptyFilters = { search: '', tags: [], category: '', mediaType: '', source: '' };
 
-const VALID_HASHES = ['map', 'list', 'ai-search', 'admin'];
+const VALID_HASHES = ['map', 'list', 'ai-search', 'queue', 'admin'];
 
 function readHash() {
   const raw = window.location.hash.replace('#', '');
@@ -59,6 +60,7 @@ function readHash() {
       showAdmin: raw === 'admin',
     };
   }
+
   // Default to list on mobile (better browse experience), map on desktop
   const isMobile = window.innerWidth < 768;
   return {
@@ -198,7 +200,7 @@ function Dashboard() {
           const { viewMode: vm, showAdmin: sa } = navigate(mode);
           setViewMode(vm);
           setShowAdmin(sa);
-          if (mode === 'ai-search') {
+          if (mode === 'ai-search' || mode === 'queue') {
             setSelectedVideo(null);
             setInitialTimestampMs(null);
           }
@@ -219,6 +221,8 @@ function Dashboard() {
       <main className="flex-1 flex overflow-hidden">
         {showAdmin ? (
           <AdminPanel />
+        ) : viewMode === 'queue' ? (
+          <QueuePanel />
         ) : viewMode === 'ai-search' ? (
           <AISearchPanel
             onResultClick={handleAISearchResultClick}

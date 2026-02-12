@@ -114,6 +114,26 @@ async def startup_event():
     finally:
         db_seed.close()
 
+    # Migrate: add review_status, reviewed_at, reviewed_by columns if missing
+    from sqlalchemy import inspect as sa_inspect, text
+    db_migrate = SessionLocal()
+    try:
+        insp = sa_inspect(engine)
+        cols = {c["name"] for c in insp.get_columns("videos")}
+        with engine.begin() as conn:
+            if "review_status" not in cols:
+                conn.execute(text("ALTER TABLE videos ADD COLUMN review_status VARCHAR(20) DEFAULT 'pending'"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_videos_review_status ON videos (review_status)"))
+                logger.info("Added review_status column to videos table")
+            if "reviewed_at" not in cols:
+                conn.execute(text("ALTER TABLE videos ADD COLUMN reviewed_at TIMESTAMP"))
+                logger.info("Added reviewed_at column to videos table")
+            if "reviewed_by" not in cols:
+                conn.execute(text("ALTER TABLE videos ADD COLUMN reviewed_by VARCHAR(255)"))
+                logger.info("Added reviewed_by column to videos table")
+    finally:
+        db_migrate.close()
+
     logger.info("Open Testimony API Server started successfully")
 
 
@@ -810,6 +830,7 @@ async def list_videos(
                 "media_type": v.media_type,
                 "category": v.category,
                 "verification_status": v.verification_status,
+                "review_status": v.review_status or "pending",
                 "uploaded_at": v.uploaded_at.isoformat()
             }
             for v in videos
@@ -844,6 +865,9 @@ async def get_video_details(
         "location_description": video.location_description,
         "notes": video.notes,
         "annotations_updated_at": video.annotations_updated_at.isoformat() if video.annotations_updated_at else None,
+        "review_status": video.review_status or "pending",
+        "reviewed_at": video.reviewed_at.isoformat() if video.reviewed_at else None,
+        "reviewed_by": video.reviewed_by,
         "uploaded_at": video.uploaded_at.isoformat(),
         "metadata": video.metadata_json
     }
@@ -1339,6 +1363,177 @@ async def update_annotations_web(
     db.commit()
 
     return {"status": "success", "message": "Annotations updated", "video_id": video_id}
+
+
+# --- Queue Management Endpoints ---
+
+@app.get("/queue")
+async def get_queue(
+    review_status: Optional[str] = "pending",
+    tags: Optional[str] = None,
+    category: Optional[str] = None,
+    search: Optional[str] = None,
+    media_type: Optional[str] = None,
+    source: Optional[str] = None,
+    sort: Optional[str] = "oldest",
+    limit: int = 50,
+    offset: int = 0,
+    staff: User = Depends(require_staff),
+    db: Session = Depends(get_db),
+):
+    """Get queue items for review with filtering and sorting."""
+    query = db.query(Video).filter(Video.deleted_at == None)
+
+    if review_status:
+        query = query.filter(Video.review_status == review_status)
+
+    if tags:
+        for tag in tags.split(","):
+            tag = tag.strip()
+            if tag:
+                query = query.filter(Video.incident_tags.any(tag))
+
+    if category:
+        query = query.filter(Video.category == category)
+
+    if media_type:
+        query = query.filter(Video.media_type == media_type)
+
+    if source:
+        query = query.filter(Video.source == source)
+
+    if search:
+        term = f"%{search}%"
+        query = query.filter(
+            or_(
+                Video.notes.ilike(term),
+                Video.location_description.ilike(term),
+                Video.device_id.ilike(term),
+            )
+        )
+
+    total = query.count()
+
+    if sort == "newest":
+        query = query.order_by(Video.uploaded_at.desc())
+    elif sort == "oldest":
+        query = query.order_by(Video.uploaded_at.asc())
+    elif sort == "tag":
+        # Sort by number of tags (least tagged first, so uncategorized items come first)
+        query = query.order_by(
+            sa_func.coalesce(sa_func.array_length(Video.incident_tags, 1), 0).asc(),
+            Video.uploaded_at.asc(),
+        )
+    else:
+        query = query.order_by(Video.uploaded_at.asc())
+
+    query = query.offset(offset).limit(limit)
+    videos = query.all()
+
+    return {
+        "total": total,
+        "count": len(videos),
+        "videos": [
+            {
+                "id": str(v.id),
+                "device_id": v.device_id,
+                "timestamp": v.timestamp.isoformat(),
+                "location": {"lat": v.latitude, "lon": v.longitude} if v.latitude is not None else None,
+                "incident_tags": v.incident_tags or [],
+                "source": v.source,
+                "media_type": v.media_type,
+                "category": v.category,
+                "location_description": v.location_description,
+                "notes": v.notes,
+                "verification_status": v.verification_status,
+                "review_status": v.review_status or "pending",
+                "reviewed_at": v.reviewed_at.isoformat() if v.reviewed_at else None,
+                "reviewed_by": v.reviewed_by,
+                "uploaded_at": v.uploaded_at.isoformat(),
+            }
+            for v in videos
+        ],
+    }
+
+
+@app.get("/queue/stats")
+async def get_queue_stats(
+    staff: User = Depends(require_staff),
+    db: Session = Depends(get_db),
+):
+    """Get queue statistics: counts by review status."""
+    rows = (
+        db.query(
+            Video.review_status,
+            sa_func.count().label("cnt"),
+        )
+        .filter(Video.deleted_at == None)
+        .group_by(Video.review_status)
+        .all()
+    )
+
+    stats = {"pending": 0, "reviewed": 0, "flagged": 0}
+    for row in rows:
+        status = row.review_status or "pending"
+        if status in stats:
+            stats[status] += row.cnt
+        else:
+            stats["pending"] += row.cnt
+
+    stats["total"] = sum(stats.values())
+
+    return stats
+
+
+class ReviewUpdate(BaseModel):
+    review_status: str  # "reviewed" or "flagged" or "pending"
+
+
+@app.put("/videos/{video_id}/review")
+async def update_review_status(
+    video_id: str,
+    body: ReviewUpdate,
+    user: User = Depends(require_staff),
+    db: Session = Depends(get_db),
+):
+    """Mark a video as reviewed, flagged, or reset to pending. Tracked in audit log."""
+    if body.review_status not in ("pending", "reviewed", "flagged"):
+        raise HTTPException(status_code=400, detail="review_status must be 'pending', 'reviewed', or 'flagged'")
+
+    video = db.query(Video).filter(Video.id == video_id, Video.deleted_at == None).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    old_status = video.review_status or "pending"
+
+    video.review_status = body.review_status
+    if body.review_status in ("reviewed", "flagged"):
+        video.reviewed_at = datetime.utcnow()
+        video.reviewed_by = user.username
+    else:
+        video.reviewed_at = None
+        video.reviewed_by = None
+
+    db.commit()
+
+    audit_service.log_event(
+        db, "queue_review",
+        {
+            "old_status": old_status,
+            "new_status": body.review_status,
+            "reviewed_by": user.username,
+        },
+        video_id=video_id,
+        user_id=str(user.id),
+    )
+    db.commit()
+
+    return {
+        "status": "success",
+        "video_id": video_id,
+        "review_status": body.review_status,
+        "reviewed_by": user.username,
+    }
 
 
 class DeleteTagRequest(BaseModel):
