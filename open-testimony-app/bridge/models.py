@@ -87,6 +87,18 @@ class ActionEmbedding(Base):
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
 
 
+class SearchQuery(Base):
+    """Log of every search query for analytics (no PII stored)."""
+    __tablename__ = "search_queries"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    query_text = Column(Text, nullable=False)
+    search_mode = Column(String(50), nullable=False)  # visual, transcript, combined, etc.
+    result_count = Column(Integer, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
+
+
 class VideoIndexStatus(Base):
     __tablename__ = "video_index_status"
 

@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
 from config import settings
-from models import ActionEmbedding, Base, ClipEmbedding, VideoIndexStatus
+from models import ActionEmbedding, Base, ClipEmbedding, SearchQuery, VideoIndexStatus
 from auth import require_auth
 
 logging.basicConfig(level=logging.INFO)

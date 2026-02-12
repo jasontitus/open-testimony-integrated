@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from auth import require_auth
 from config import settings
+from models import SearchQuery
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,23 @@ def _ms(t0, t1):
     return int((t1 - t0) * 1000)
 
 
+def _log_search(db: Session, query_text: str, search_mode: str,
+                result_count: int, duration_ms: int):
+    """Record a search query to the database for analytics (no PII)."""
+    try:
+        entry = SearchQuery(
+            query_text=query_text,
+            search_mode=search_mode,
+            result_count=result_count,
+            duration_ms=duration_ms,
+        )
+        db.add(entry)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.warning("Failed to log search query", exc_info=True)
+
+
 def _visual_text_encode_and_search(q, db, limit):
     """Run visual text encoding + DB search under the vision lock."""
     from main import vision_model, vision_lock
@@ -46,6 +64,7 @@ def _visual_text_encode_and_search(q, db, limit):
 
 @router.get("/visual")
 async def visual_text_search(
+
     q: str = Query(..., min_length=1, description="Text query for visual search"),
     limit: int = Query(20, ge=1, le=100),
     _user: dict = Depends(require_auth),
@@ -56,14 +75,16 @@ async def visual_text_search(
     _, results, t_encode, t_search = await asyncio.to_thread(
         _visual_text_encode_and_search, q, db, limit
     )
+    total_ms = _ms(t0, t_search)
     logger.info(f"visual_text q={q!r}: encode={t_encode-t0:.3f}s db={t_search-t_encode:.3f}s total={t_search-t0:.3f}s")
+    _log_search(db, q, "visual", len(results), total_ms)
     return {
         "query": q,
         "mode": "visual_text",
         "timing": {
             "encode_ms": _ms(t0, t_encode),
             "visual_search_ms": _ms(t_encode, t_search),
-            "total_ms": _ms(t0, t_search),
+            "total_ms": total_ms,
         },
         "results": results,
     }
@@ -125,6 +146,7 @@ def _transcript_encode_and_search(q, db, limit):
 
 @router.get("/transcript")
 async def transcript_semantic_search(
+
     q: str = Query(..., min_length=1, description="Text query for semantic transcript search"),
     limit: int = Query(20, ge=1, le=100),
     _user: dict = Depends(require_auth),
@@ -135,14 +157,16 @@ async def transcript_semantic_search(
     results, t_encode, t_search = await asyncio.to_thread(
         _transcript_encode_and_search, q, db, limit
     )
+    total_ms = _ms(t0, t_search)
     logger.info(f"transcript_semantic q={q!r}: encode={t_encode-t0:.3f}s db={t_search-t_encode:.3f}s total={t_search-t0:.3f}s")
+    _log_search(db, q, "transcript", len(results), total_ms)
     return {
         "query": q,
         "mode": "transcript_semantic",
         "timing": {
             "encode_ms": _ms(t0, t_encode),
             "transcript_search_ms": _ms(t_encode, t_search),
-            "total_ms": _ms(t0, t_search),
+            "total_ms": total_ms,
         },
         "results": results,
     }
@@ -159,6 +183,7 @@ def _transcript_exact_search(q, db, limit):
 
 @router.get("/transcript/exact")
 async def transcript_exact_search(
+
     q: str = Query(..., min_length=1, description="Text query for exact transcript search"),
     limit: int = Query(20, ge=1, le=100),
     _user: dict = Depends(require_auth),
@@ -169,13 +194,15 @@ async def transcript_exact_search(
     results, t_search = await asyncio.to_thread(
         _transcript_exact_search, q, db, limit
     )
+    total_ms = _ms(t0, t_search)
     logger.info(f"transcript_exact q={q!r}: db={t_search-t0:.3f}s")
+    _log_search(db, q, "transcript_exact", len(results), total_ms)
     return {
         "query": q,
         "mode": "transcript_exact",
         "timing": {
-            "search_ms": _ms(t0, t_search),
-            "total_ms": _ms(t0, t_search),
+            "search_ms": total_ms,
+            "total_ms": total_ms,
         },
         "results": results,
     }
@@ -192,6 +219,7 @@ def _caption_exact_search(q, db, limit):
 
 @router.get("/captions/exact")
 async def caption_exact_search(
+
     q: str = Query(..., min_length=1, description="Text query for exact caption search"),
     limit: int = Query(20, ge=1, le=100),
     _user: dict = Depends(require_auth),
@@ -202,13 +230,15 @@ async def caption_exact_search(
     results, t_search = await asyncio.to_thread(
         _caption_exact_search, q, db, limit
     )
+    total_ms = _ms(t0, t_search)
     logger.info(f"caption_exact q={q!r}: db={t_search-t0:.3f}s")
+    _log_search(db, q, "caption_exact", len(results), total_ms)
     return {
         "query": q,
         "mode": "caption_exact",
         "timing": {
-            "search_ms": _ms(t0, t_search),
-            "total_ms": _ms(t0, t_search),
+            "search_ms": total_ms,
+            "total_ms": total_ms,
         },
         "results": results,
     }
@@ -229,6 +259,7 @@ def _caption_encode_and_search(q, db, limit):
 
 @router.get("/captions")
 async def caption_search(
+
     q: str = Query(..., min_length=1, description="Text query for caption search"),
     limit: int = Query(20, ge=1, le=100),
     _user: dict = Depends(require_auth),
@@ -239,14 +270,16 @@ async def caption_search(
     results, t_encode, t_search = await asyncio.to_thread(
         _caption_encode_and_search, q, db, limit
     )
+    total_ms = _ms(t0, t_search)
     logger.info(f"caption q={q!r}: encode={t_encode-t0:.3f}s db={t_search-t_encode:.3f}s total={t_search-t0:.3f}s")
+    _log_search(db, q, "caption", len(results), total_ms)
     return {
         "query": q,
         "mode": "caption_semantic",
         "timing": {
             "encode_ms": _ms(t0, t_encode),
             "caption_search_ms": _ms(t_encode, t_search),
-            "total_ms": _ms(t0, t_search),
+            "total_ms": total_ms,
         },
         "results": results,
     }
@@ -269,6 +302,7 @@ def _clip_visual_encode_and_search(q, db, limit):
 
 @router.get("/clips")
 async def clip_visual_search(
+
     q: str = Query(..., min_length=1, description="Text query for clip-level visual search"),
     limit: int = Query(20, ge=1, le=100),
     _user: dict = Depends(require_auth),
@@ -283,14 +317,16 @@ async def clip_visual_search(
     results, t_encode, t_search = await asyncio.to_thread(
         _clip_visual_encode_and_search, q, db, limit
     )
+    total_ms = _ms(t0, t_search)
     logger.info(f"clip_visual q={q!r}: encode={t_encode-t0:.3f}s db={t_search-t_encode:.3f}s total={t_search-t0:.3f}s")
+    _log_search(db, q, "clips", len(results), total_ms)
     return {
         "query": q,
         "mode": "clip_visual",
         "timing": {
             "encode_ms": _ms(t0, t_encode),
             "clip_search_ms": _ms(t_encode, t_search),
-            "total_ms": _ms(t0, t_search),
+            "total_ms": total_ms,
         },
         "results": results,
     }
@@ -311,6 +347,7 @@ def _action_encode_and_search(q, db, limit):
 
 @router.get("/actions")
 async def action_search(
+
     q: str = Query(..., min_length=1, description="Text query for action/motion search"),
     limit: int = Query(20, ge=1, le=100),
     _user: dict = Depends(require_auth),
@@ -325,14 +362,16 @@ async def action_search(
     results, t_encode, t_search = await asyncio.to_thread(
         _action_encode_and_search, q, db, limit
     )
+    total_ms = _ms(t0, t_search)
     logger.info(f"action q={q!r}: encode={t_encode-t0:.3f}s db={t_search-t_encode:.3f}s total={t_search-t0:.3f}s")
+    _log_search(db, q, "actions", len(results), total_ms)
     return {
         "query": q,
         "mode": "action_semantic",
         "timing": {
             "encode_ms": _ms(t0, t_encode),
             "action_search_ms": _ms(t_encode, t_search),
-            "total_ms": _ms(t0, t_search),
+            "total_ms": total_ms,
         },
         "results": results,
     }
@@ -349,6 +388,7 @@ def _action_exact_search(q, db, limit):
 
 @router.get("/actions/exact")
 async def action_exact_search(
+
     q: str = Query(..., min_length=1, description="Text query for exact action search"),
     limit: int = Query(20, ge=1, le=100),
     _user: dict = Depends(require_auth),
@@ -359,13 +399,15 @@ async def action_exact_search(
     results, t_search = await asyncio.to_thread(
         _action_exact_search, q, db, limit
     )
+    total_ms = _ms(t0, t_search)
     logger.info(f"action_exact q={q!r}: db={t_search-t0:.3f}s")
+    _log_search(db, q, "actions_exact", len(results), total_ms)
     return {
         "query": q,
         "mode": "action_exact",
         "timing": {
-            "search_ms": _ms(t0, t_search),
-            "total_ms": _ms(t0, t_search),
+            "search_ms": total_ms,
+            "total_ms": total_ms,
         },
         "results": results,
     }
@@ -406,6 +448,7 @@ def _combined_encode_and_search(q, db, limit):
 
 @router.get("/combined")
 async def combined_search(
+
     q: str = Query(..., min_length=1, description="Text query for combined visual + caption search"),
     limit: int = Query(20, ge=1, le=100),
     _user: dict = Depends(require_auth),
@@ -482,10 +525,12 @@ async def combined_search(
         r["score"] = r["rrf_score"] / max_rrf  # normalize so best = 1.0
 
     t_end = time.time()
+    total_ms = _ms(t0, t_end)
     logger.info(
         f"combined q={q!r}: encode={t_encode-t0:.3f}s visual={t_visual-t_encode:.3f}s "
         f"caption={t_caption-t_visual:.3f}s clips={t_clips-t_caption:.3f}s total={t_end-t0:.3f}s"
     )
+    _log_search(db, q, "combined", len(results), total_ms)
     return {
         "query": q,
         "mode": "combined",
@@ -494,7 +539,7 @@ async def combined_search(
             "visual_search_ms": _ms(t_encode, t_visual),
             "caption_search_ms": _ms(t_visual, t_caption),
             "clip_search_ms": _ms(t_caption, t_clips),
-            "total_ms": _ms(t0, t_end),
+            "total_ms": total_ms,
         },
         "results": results,
     }

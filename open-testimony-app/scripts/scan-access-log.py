@@ -3,12 +3,12 @@
 Scan the API access log and flag requests from IPs outside the local LAN.
 
 Usage:
-    # If the api container is running, copy the log out first:
-    docker compose cp api:/app/logs/access.jsonl ./access.jsonl
-    python3 scripts/scan-access-log.py ./access.jsonl
+    # Copy API log and scan together with local bridge log:
+    docker compose cp api:/app/logs/access.jsonl ./api-access.jsonl
+    python3 scripts/scan-access-log.py ./api-access.jsonl bridge/logs/access.jsonl
 
-    # Or read from the named volume directly (if mounted):
-    python3 scripts/scan-access-log.py /path/to/access.jsonl
+    # Or just one log file:
+    python3 scripts/scan-access-log.py bridge/logs/access.jsonl
 
     # With options:
     python3 scripts/scan-access-log.py access.jsonl --lan 10.0.0.0/8 --lan 192.168.1.0/24 --json
@@ -51,7 +51,8 @@ def parse_args():
     )
     p.add_argument(
         "logfile",
-        help="Path to access.jsonl log file",
+        nargs="+",
+        help="Path(s) to access.jsonl log file(s). Multiple files are merged.",
     )
     p.add_argument(
         "--lan",
@@ -92,20 +93,21 @@ def main():
             except ValueError:
                 print(f"WARNING: Invalid CIDR '{cidr}', skipping.", file=sys.stderr)
 
-    # Read and parse the log file
+    # Read and parse the log file(s)
     entries = []
     line_num = 0
-    with open(args.logfile) as f:
-        for line in f:
-            line_num += 1
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-                entries.append(entry)
-            except json.JSONDecodeError:
-                print(f"WARNING: Skipping malformed line {line_num}", file=sys.stderr)
+    for logfile in args.logfile:
+        with open(logfile) as f:
+            for line in f:
+                line_num += 1
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    entries.append(entry)
+                except json.JSONDecodeError:
+                    print(f"WARNING: Skipping malformed line {line_num}", file=sys.stderr)
 
     if not entries:
         print("No log entries found.")

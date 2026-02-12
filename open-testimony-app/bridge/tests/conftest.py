@@ -21,7 +21,7 @@ from sqlalchemy.orm import sessionmaker
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import settings
-from models import Base, CaptionEmbedding, FrameEmbedding, TranscriptEmbedding, VideoIndexStatus
+from models import Base, CaptionEmbedding, FrameEmbedding, SearchQuery, TranscriptEmbedding, VideoIndexStatus
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
@@ -82,6 +82,7 @@ def clean_tables(db_engine):
     """Truncate bridge tables between tests."""
     yield
     with db_engine.connect() as conn:
+        conn.execute(text("DELETE FROM search_queries"))
         conn.execute(text("DELETE FROM caption_embeddings"))
         conn.execute(text("DELETE FROM frame_embeddings"))
         conn.execute(text("DELETE FROM transcript_embeddings"))
