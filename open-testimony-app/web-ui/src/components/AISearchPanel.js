@@ -8,12 +8,12 @@ import QuickTagMenu from './QuickTagMenu';
 import AddressAutocomplete from './AddressAutocomplete';
 
 const SEARCH_MODES = [
+  { id: 'combined', label: 'Visual', icon: Eye, description: 'Visual + scene descriptions' },
   { id: 'visual_text', label: 'Embedding', icon: Film, description: 'Describe what you see' },
   { id: 'visual_image', label: 'Search by Image', icon: Upload, description: 'Upload a reference image' },
-  { id: 'combined', label: 'Visual', icon: Eye, description: 'Visual + scene descriptions' },
+  { id: 'caption_exact', label: 'Caption (Exact)', icon: Search, description: 'Search exact caption phrases' },
   { id: 'transcript_semantic', label: 'Transcript (Semantic)', icon: MessageSquare, description: 'Search by meaning' },
   { id: 'transcript_exact', label: 'Transcript (Exact)', icon: Search, description: 'Search exact words' },
-  { id: 'caption_exact', label: 'Caption (Exact)', icon: Search, description: 'Search exact caption phrases' },
 ];
 
 const aiApi = axios.create({
@@ -83,10 +83,21 @@ function SearchForm({ mode, loading, onSearch, onImageChange, imageFile }) {
   );
 }
 
+function HighlightText({ text, query }) {
+  if (!query || !text) return text || null;
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
+  return parts.map((part, i) =>
+    part.toLowerCase() === query.toLowerCase()
+      ? <mark key={i} className="bg-yellow-500/30 text-yellow-200 rounded-sm px-0.5">{part}</mark>
+      : part
+  );
+}
+
 // --- Inline component: collapsible group of results for one video ---
 function VideoResultGroup({
   group, mode, onResultClick, onVideoClick, availableTags, tagCounts, onVideoTagsChanged,
-  canEdit, selectMode, selectedResults, onToggleSelect, isResultSelected, searchTiming,
+  canEdit, selectMode, selectedResults, onToggleSelect, isResultSelected, searchTiming, searchQuery,
 }) {
   const [expanded, setExpanded] = useState(false);
   const best = group.results[0];
@@ -249,6 +260,7 @@ function VideoResultGroup({
               selected={isResultSelected(result)}
               onToggleSelect={onToggleSelect}
               searchTiming={searchTiming}
+              searchQuery={searchQuery}
             />
           ))}
         </div>
@@ -259,14 +271,15 @@ function VideoResultGroup({
 
 export default function AISearchPanel({ onResultClick, availableTags, tagCounts, onVideoTagsChanged }) {
   const { user, logout } = useAuth();
-  const [mode, setMode] = useState('visual_text');
+  const [mode, setMode] = useState('combined');
   const [imageFile, setImageFile] = useState(null);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [stats, setStats] = useState(null);
   const [searchTiming, setSearchTiming] = useState(null);
-  const [searchMode, setSearchMode] = useState('visual_text');
+  const [searchMode, setSearchMode] = useState('combined');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Inline video player state
   const [activeResult, setActiveResult] = useState(null);
@@ -329,6 +342,7 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
     setVideoUrl(null);
     setVideoDetail(null);
     setSelectedResults([]);
+    setSearchQuery(query);
 
     try {
       let res;
@@ -584,13 +598,13 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
             </div>
             {activeResult.segment_text && (
               <div className="px-4 py-2 bg-gray-800 border-t border-gray-700">
-                <p className="text-sm text-gray-300">&ldquo;{activeResult.segment_text}&rdquo;</p>
+                <p className="text-sm text-gray-300">&ldquo;<HighlightText text={activeResult.segment_text} query={searchQuery} />&rdquo;</p>
               </div>
             )}
             {activeResult.caption_text && (
               <div className="px-4 py-2 bg-gray-800 border-t border-gray-700">
                 <p className="text-[10px] text-teal-400 uppercase font-bold mb-1">AI Scene Description</p>
-                <p className="text-sm text-gray-300">{activeResult.caption_text}</p>
+                <p className="text-sm text-gray-300"><HighlightText text={activeResult.caption_text} query={searchQuery} /></p>
               </div>
             )}
 
@@ -752,6 +766,7 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
                     onToggleSelect={toggleSelectResult}
                     isResultSelected={isResultSelected}
                     searchTiming={searchTiming}
+                    searchQuery={searchQuery}
                   />
                 ))}
               </div>

@@ -11,9 +11,20 @@ function formatTimestamp(ms) {
   return `${min}:${sec.toString().padStart(2, '0')}`;
 }
 
+function HighlightText({ text, query }) {
+  if (!query || !text) return text || null;
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
+  return parts.map((part, i) =>
+    part.toLowerCase() === query.toLowerCase()
+      ? <mark key={i} className="bg-yellow-500/30 text-yellow-200 rounded-sm px-0.5">{part}</mark>
+      : part
+  );
+}
+
 export default function AISearchResultCard({
   result, mode, onClick, availableTags, tagCounts, onVideoTagsChanged, onCategoryChanged,
-  selectable, selected, onToggleSelect, searchTiming,
+  selectable, selected, onToggleSelect, searchTiming, searchQuery,
 }) {
   const { user } = useAuth();
   const isVisual = mode === 'visual_text' || mode === 'visual_image' || mode === 'combined' || mode === 'caption_semantic' || mode === 'caption_exact';
@@ -173,14 +184,14 @@ export default function AISearchResultCard({
           {/* Transcript text */}
           {result.segment_text && (
             <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed">
-              &ldquo;{result.segment_text}&rdquo;
+              &ldquo;<HighlightText text={result.segment_text} query={searchQuery} />&rdquo;
             </p>
           )}
 
           {/* Caption text preview (for caption/combined results) */}
           {result.caption_text && !result.segment_text && (
             <p className="text-xs text-teal-400/80 line-clamp-2 leading-relaxed">
-              {result.caption_text}
+              <HighlightText text={result.caption_text} query={searchQuery} />
             </p>
           )}
 
