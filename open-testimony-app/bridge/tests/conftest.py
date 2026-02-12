@@ -25,7 +25,7 @@ from models import Base, CaptionEmbedding, FrameEmbedding, SearchQuery, Transcri
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "postgresql://user:pass@db:5432/opentestimony_test",
+    "postgresql://user:pass@localhost:5432/opentestimony_test",
 )
 
 

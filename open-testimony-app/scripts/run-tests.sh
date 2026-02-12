@@ -14,7 +14,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DB_URL="${TEST_DATABASE_URL:-postgresql://user:pass@localhost:5432/opentestimony}"
+DB_URL="${TEST_DATABASE_URL:-postgresql://user:pass@localhost:5432/opentestimony_test}"
 FAILED=0
 
 red()   { printf '\033[1;31m%s\033[0m\n' "$*"; }
