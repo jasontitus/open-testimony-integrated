@@ -68,6 +68,8 @@ class Settings:
     CLIP_WINDOW_STRIDE: int = int(os.environ.get("CLIP_WINDOW_STRIDE", "8"))
     # FPS for clip frame extraction (higher than FRAME_INTERVAL_SEC for temporal detail)
     CLIP_FPS: float = float(os.environ.get("CLIP_FPS", "4.0"))
+    # Whether to run Gemini action captioning on clip windows (expensive — disable to save cost)
+    CLIP_ACTION_CAPTIONING: bool = os.environ.get("CLIP_ACTION_CAPTIONING", "true").lower() == "true"
     # Prompt for temporal action captioning (sent with multi-frame sequences to Gemini)
     CLIP_ACTION_PROMPT: str = os.environ.get(
         "CLIP_ACTION_PROMPT",

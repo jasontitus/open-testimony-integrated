@@ -338,7 +338,6 @@ def _store_clip_embeddings(video_id, local_path, db, device):
     """
     import time as _time
     import main as bridge_main
-    from indexing.action_captioning import caption_clip_batch
 
     logger.info(f"Extracting clip windows for {video_id}")
     t0 = _time.perf_counter()
@@ -381,35 +380,40 @@ def _store_clip_embeddings(video_id, local_path, db, device):
     logger.info(f"Stored {clip_count} clip vision embeddings in {t2-t1:.1f}s")
 
     # Stage B: Action captions (temporal multi-frame captioning via Gemini)
-    # Sample representative frames from each window for captioning
+    # Skipped when CLIP_ACTION_CAPTIONING is disabled (expensive — $7/batch)
     action_count = 0
-    action_captions = caption_clip_batch(windows)
-    t3 = _time.perf_counter()
-    logger.info(f"Generated {len(action_captions)} action captions in {t3-t2:.1f}s")
+    if settings.CLIP_ACTION_CAPTIONING:
+        from indexing.action_captioning import caption_clip_batch
 
-    if action_captions:
-        caption_texts = [ac[5] for ac in action_captions]
-        with bridge_main.text_lock:
-            action_embs = bridge_main.text_model.encode(
-                caption_texts,
-                convert_to_numpy=True,
-                show_progress_bar=False,
-                normalize_embeddings=True,
-            )
-        t4 = _time.perf_counter()
-        logger.info(f"Embedded {len(caption_texts)} action captions in {t4-t3:.1f}s")
+        action_captions = caption_clip_batch(windows)
+        t3 = _time.perf_counter()
+        logger.info(f"Generated {len(action_captions)} action captions in {t3-t2:.1f}s")
 
-        for i, (win_idx, start_ms, end_ms, start_frame, end_frame, action_text) in enumerate(action_captions):
-            db.add(ActionEmbedding(
-                video_id=video_id,
-                start_ms=start_ms, end_ms=end_ms,
-                start_frame=start_frame, end_frame=end_frame,
-                num_frames=settings.CLIP_WINDOW_FRAMES,
-                action_text=action_text,
-                embedding=action_embs[i].tolist(),
-            ))
-            action_count += 1
-        db.flush()
+        if action_captions:
+            caption_texts = [ac[5] for ac in action_captions]
+            with bridge_main.text_lock:
+                action_embs = bridge_main.text_model.encode(
+                    caption_texts,
+                    convert_to_numpy=True,
+                    show_progress_bar=False,
+                    normalize_embeddings=True,
+                )
+            t4 = _time.perf_counter()
+            logger.info(f"Embedded {len(caption_texts)} action captions in {t4-t3:.1f}s")
+
+            for i, (win_idx, start_ms, end_ms, start_frame, end_frame, action_text) in enumerate(action_captions):
+                db.add(ActionEmbedding(
+                    video_id=video_id,
+                    start_ms=start_ms, end_ms=end_ms,
+                    start_frame=start_frame, end_frame=end_frame,
+                    num_frames=settings.CLIP_WINDOW_FRAMES,
+                    action_text=action_text,
+                    embedding=action_embs[i].tolist(),
+                ))
+                action_count += 1
+            db.flush()
+    else:
+        logger.info("Skipping action captioning (CLIP_ACTION_CAPTIONING=false)")
 
     total = clip_count + action_count
     logger.info(f"Clip indexing complete: {clip_count} vision + {action_count} action = {total} total")

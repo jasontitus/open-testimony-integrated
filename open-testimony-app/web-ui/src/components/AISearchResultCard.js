@@ -5,6 +5,7 @@ import { useAuth } from '../auth';
 import QuickTagMenu from './QuickTagMenu';
 
 function formatTimestamp(ms) {
+  if (ms == null || isNaN(ms)) return '0:00';
   const totalSec = Math.floor(ms / 1000);
   const min = Math.floor(totalSec / 60);
   const sec = totalSec % 60;
@@ -175,7 +176,7 @@ export default function AISearchResultCard({
           <div className="flex items-center gap-1 text-xs text-gray-300 mb-1">
             <Clock size={10} className="text-gray-500" />
             {isVisual ? (
-              <span>Frame at {formatTimestamp(result.timestamp_ms)}</span>
+              <span>Frame at {formatTimestamp(result.timestamp_ms ?? result.start_ms)}</span>
             ) : (
               <span>{formatTimestamp(result.start_ms)} &ndash; {formatTimestamp(result.end_ms)}</span>
             )}

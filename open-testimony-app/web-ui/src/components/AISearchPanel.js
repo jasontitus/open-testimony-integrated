@@ -21,18 +21,13 @@ const aiApi = axios.create({
   withCredentials: true,
 });
 
-function SearchForm({ mode, loading, onSearch, onImageChange, imageFile }) {
-  const [inputValue, setInputValue] = useState('');
+function SearchForm({ mode, loading, onSearch, onImageChange, imageFile, initialQuery }) {
+  const [inputValue, setInputValue] = useState(initialQuery || '');
   const searchInputRef = useRef(null);
 
   useEffect(() => {
     if (searchInputRef.current) searchInputRef.current.focus();
   }, []);
-
-  // Reset input when mode changes
-  useEffect(() => {
-    setInputValue('');
-  }, [mode]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -100,7 +95,7 @@ function VideoResultGroup({
   canEdit, selectMode, selectedResults, onToggleSelect, isResultSelected, searchTiming, searchQuery,
 }) {
   const [expanded, setExpanded] = useState(false);
-  const best = group.results[0];
+  const best = group.results.reduce((max, r) => (r.score > max.score) ? r : max, group.results[0]);
   const count = group.results.length;
   const scorePercent = group.bestScore != null ? Math.round(group.bestScore * 100) : null;
   const isVisual = mode === 'visual_text' || mode === 'visual_image' || mode === 'combined' || mode === 'caption_semantic' || mode === 'caption_exact';
@@ -331,9 +326,10 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
     return groups;
   }, [results]);
 
-  const handleSearch = async (query) => {
-    if (mode !== 'visual_image' && !query.trim()) return;
-    if (mode === 'visual_image' && !imageFile) return;
+  const handleSearch = async (query, overrideMode) => {
+    const effectiveMode = overrideMode || mode;
+    if (effectiveMode !== 'visual_image' && !query.trim()) return;
+    if (effectiveMode === 'visual_image' && !imageFile) return;
 
     setLoading(true);
     setError('');
@@ -346,25 +342,25 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
 
     try {
       let res;
-      if (mode === 'visual_text') {
+      if (effectiveMode === 'visual_text') {
         res = await aiApi.get('/search/visual', { params: { q: query, limit: 20 } });
-      } else if (mode === 'visual_image') {
+      } else if (effectiveMode === 'visual_image') {
         const formData = new FormData();
         formData.append('image', imageFile);
         res = await aiApi.post('/search/visual', formData, { params: { limit: 20 } });
-      } else if (mode === 'combined') {
+      } else if (effectiveMode === 'combined') {
         res = await aiApi.get('/search/combined', { params: { q: query, limit: 20 } });
-      } else if (mode === 'transcript_semantic') {
+      } else if (effectiveMode === 'transcript_semantic') {
         res = await aiApi.get('/search/transcript', { params: { q: query, limit: 20 } });
-      } else if (mode === 'transcript_exact') {
+      } else if (effectiveMode === 'transcript_exact') {
         res = await aiApi.get('/search/transcript/exact', { params: { q: query, limit: 20 } });
-      } else if (mode === 'caption_exact') {
+      } else if (effectiveMode === 'caption_exact') {
         res = await aiApi.get('/search/captions/exact', { params: { q: query, limit: 20 } });
       }
       const rawResults = res.data.results || [];
       setResults(rawResults);
       setSearchTiming(res.data.timing || null);
-      setSearchMode(mode);
+      setSearchMode(effectiveMode);
 
       // Enrich results with existing tags + category from the API
       const uniqueIds = [...new Set(rawResults.map(r => r.video_id))];
@@ -398,11 +394,10 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
     }
   };
 
-  // Open a video (from group header click) — plays from start, shows annotations
+  // Open a video (from group header click) — seeks to best match
   const handleVideoClick = async (videoId, bestResult) => {
     if (selectMode) return;
-    // Use a synthetic result with no timestamp so the player starts from 0
-    setActiveResult({ ...bestResult, _noSeek: true });
+    setActiveResult(bestResult);
     setVideoUrl(null);
     setVideoLoading(true);
     setVideoDetail(null);
@@ -532,7 +527,7 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
             return (
               <button
                 key={m.id}
-                onClick={() => { setMode(m.id); setResults([]); setError(''); setActiveResult(null); setSelectedResults([]); }}
+                onClick={() => { setMode(m.id); setError(''); setActiveResult(null); if (searchQuery && m.id !== 'visual_image') { handleSearch(searchQuery, m.id); } else { setResults([]); setSelectedResults([]); } }}
                 className={`flex flex-col items-center gap-1 px-3 py-2 rounded-lg border text-xs transition ${
                   mode === m.id
                     ? 'bg-blue-600 border-blue-500 text-white'
@@ -552,6 +547,7 @@ export default function AISearchPanel({ onResultClick, availableTags, tagCounts,
           onSearch={handleSearch}
           onImageChange={setImageFile}
           imageFile={imageFile}
+          initialQuery={searchQuery}
         />
 
         {stats && (

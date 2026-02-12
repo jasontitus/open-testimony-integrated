@@ -8,7 +8,7 @@ const STATUS_CONFIG = {
   'error-mvp': { label: 'Unverified', icon: AlertTriangle, className: 'bg-yellow-900/30 border-yellow-500/50 text-yellow-400' },
   'error': { label: 'Error', icon: ShieldAlert, className: 'bg-orange-900/30 border-orange-500/50 text-orange-400' },
   'failed': { label: 'Failed', icon: AlertCircle, className: 'bg-red-900/30 border-red-500/50 text-red-400' },
-  'pending': { label: 'Pending', icon: Clock, className: 'bg-yellow-900/30 border-yellow-500/50 text-yellow-400' },
+  'pending': { label: 'Unverified', icon: AlertTriangle, className: 'bg-yellow-900/30 border-yellow-500/50 text-yellow-400' },
 };
 
 export default function VerificationBadge({ status }) {

@@ -180,6 +180,26 @@ def _migrate_embedding_dimensions():
             ))
             conn.commit()
 
+        # Check clip_embeddings column dimension (also uses VISION_EMBEDDING_DIM)
+        clip_row = conn.execute(text("""
+            SELECT atttypmod FROM pg_attribute
+            JOIN pg_class ON pg_class.oid = pg_attribute.attrelid
+            WHERE pg_class.relname = 'clip_embeddings'
+            AND pg_attribute.attname = 'embedding'
+        """)).fetchone()
+
+        if clip_row and clip_row[0] != settings.VISION_EMBEDDING_DIM:
+            logger.warning(
+                f"clip_embeddings.embedding dimension mismatch: "
+                f"DB={clip_row[0]}, config={settings.VISION_EMBEDDING_DIM}. "
+                f"Dropping and recreating column (data will be regenerated via reindex)."
+            )
+            conn.execute(text("ALTER TABLE clip_embeddings DROP COLUMN embedding"))
+            conn.execute(text(
+                f"ALTER TABLE clip_embeddings ADD COLUMN embedding vector({settings.VISION_EMBEDDING_DIM})"
+            ))
+            conn.commit()
+
         # Add caption_indexed / caption_count to video_index_status if missing
         cols = conn.execute(text("""
             SELECT column_name FROM information_schema.columns
@@ -593,11 +613,16 @@ async def reindex_visual_video(
                    f"to finish before visual reindex",
         )
 
-    # Only clear visual state, leave captions/transcripts intact
+    # Clear visual state + clips/actions (all depend on the vision model),
+    # leave captions/transcripts intact
     db.query(FrameEmbedding).filter(FrameEmbedding.video_id == video_uuid).delete()
+    db.query(ClipEmbedding).filter(ClipEmbedding.video_id == video_uuid).delete()
+    db.query(ActionEmbedding).filter(ActionEmbedding.video_id == video_uuid).delete()
     job.status = "pending_visual"
     job.visual_indexed = False
     job.frame_count = None
+    job.clip_indexed = False
+    job.clip_count = None
     job.error_message = None
     db.commit()
 
@@ -626,13 +651,21 @@ async def reindex_visual_all(
             skipped.append(str(job.video_id))
             continue
 
-        # Delete frame embeddings for this video only
+        # Delete visual embeddings (frames + clips + actions) for this video
         db.query(FrameEmbedding).filter(
             FrameEmbedding.video_id == job.video_id
+        ).delete()
+        db.query(ClipEmbedding).filter(
+            ClipEmbedding.video_id == job.video_id
+        ).delete()
+        db.query(ActionEmbedding).filter(
+            ActionEmbedding.video_id == job.video_id
         ).delete()
         job.status = "pending_visual"
         job.visual_indexed = False
         job.frame_count = None
+        job.clip_indexed = False
+        job.clip_count = None
         job.error_message = None
         queued.append(str(job.video_id))
 

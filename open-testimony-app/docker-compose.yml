@@ -92,10 +92,9 @@ services:
       - MINIO_BUCKET=opentestimony-videos
       - JWT_SECRET_KEY=change-me-in-production-use-a-real-secret
       # Model configuration
-      - VISION_MODEL_FAMILY=hf_siglip
-      - VISION_MODEL_NAME=google/siglip2-so400m-patch16-naflex
-      - VISION_MODEL_PRETRAINED=webli
-      - VISION_EMBEDDING_DIM=1152
+      - VISION_MODEL_FAMILY=pe_core
+      - VISION_MODEL_NAME=PE-Core-L14-336
+      - VISION_EMBEDDING_DIM=1024
       - TRANSCRIPT_MODEL_NAME=Qwen/Qwen3-Embedding-8B
       - TRANSCRIPT_EMBEDDING_DIM=4096
       - WHISPER_MODEL=large-v3
@@ -114,6 +113,7 @@ services:
       - OT_API_URL=http://api:8000
       # Video clip understanding (temporal windows for action/motion detection)
       - CLIP_ENABLED=true
+      - CLIP_ACTION_CAPTIONING=false
       - CLIP_WINDOW_FRAMES=16
       - CLIP_WINDOW_STRIDE=8
       - CLIP_FPS=4.0
