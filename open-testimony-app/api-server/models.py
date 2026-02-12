@@ -53,6 +53,11 @@ class Video(Base):
     annotations_updated_at = Column(DateTime, nullable=True)
     annotations_updated_by = Column(String(255), nullable=True)
 
+    # Queue review status
+    review_status = Column(String(20), default="pending", index=True)  # "pending", "reviewed", "flagged"
+    reviewed_at = Column(DateTime, nullable=True)
+    reviewed_by = Column(String(255), nullable=True)
+
     # System timestamps
     uploaded_at = Column(DateTime, nullable=False, index=True)
 

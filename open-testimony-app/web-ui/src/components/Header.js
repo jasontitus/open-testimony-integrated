@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '../auth';
-import { Map as MapIcon, List, LogOut, Users, Search } from 'lucide-react';
+import { Map as MapIcon, List, LogOut, Users, Search, ClipboardList } from 'lucide-react';
 
 export default function Header({ viewMode, setViewMode, showAdmin, onToggleAdmin }) {
   const { user, logout } = useAuth();
@@ -39,6 +39,13 @@ export default function Header({ viewMode, setViewMode, showAdmin, onToggleAdmin
             >
               <Search size={18} />
               <span className="hidden sm:inline">AI Search</span>
+            </button>
+            <button
+              onClick={() => setViewMode('queue')}
+              className={`flex items-center space-x-2 px-4 py-1.5 rounded-md transition ${viewMode === 'queue' ? 'bg-amber-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
+            >
+              <ClipboardList size={18} />
+              <span className="hidden sm:inline">Queue</span>
             </button>
           </div>
         )}
