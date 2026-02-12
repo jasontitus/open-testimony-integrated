@@ -37,6 +37,11 @@ migrate: ## Run database migrations
 	docker compose exec db psql -U user -d opentestimony -f /dev/stdin < api-server/migrations/001_add_annotations.sql
 	docker compose exec db psql -U user -d opentestimony -f /dev/stdin < api-server/migrations/002_add_audit_log.sql
 	docker compose exec db psql -U user -d opentestimony -f /dev/stdin < api-server/migrations/003_add_users.sql
+	docker compose exec db psql -U user -d opentestimony -f /dev/stdin < api-server/migrations/004_add_search_indexes.sql
+	docker compose exec db psql -U user -d opentestimony -f /dev/stdin < api-server/migrations/005_add_pgvector.sql
+	docker compose exec db psql -U user -d opentestimony -f /dev/stdin < api-server/migrations/006_add_tags_table.sql
+	docker compose exec db psql -U user -d opentestimony -f /dev/stdin < api-server/migrations/007_upgrade_frame_embedding_dim.sql
+	docker compose exec db psql -U user -d opentestimony -f /dev/stdin < api-server/migrations/008_add_clip_embeddings.sql
 
 # ---------- Setup ----------
 
