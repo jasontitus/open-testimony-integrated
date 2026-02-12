@@ -24,6 +24,10 @@ bridge/.venv/
 # Local bridge runtime data
 data/
 
+# Access logs (generated at runtime)
+access.jsonl
+**/logs/access.jsonl
+
 # Claude Code
 .claude/
 

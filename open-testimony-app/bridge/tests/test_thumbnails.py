@@ -3,28 +3,25 @@ import os
 
 
 class TestThumbnailEndpoint:
-    def test_exact_thumbnail_found(self, client, auth_cookie):
+    def test_exact_thumbnail_found(self, client, auth_cookie, tmp_path):
         """GET /thumbnails/{id}/{ts}.jpg returns 200 when file exists."""
+        import tempfile
+        from unittest.mock import patch
+
         video_id = "test-thumb-video"
-        thumb_dir = f"/data/thumbnails/{video_id}"
-        thumb_path = os.path.join(thumb_dir, "5000.jpg")
+        thumb_dir = tmp_path / "thumbnails" / video_id
+        thumb_dir.mkdir(parents=True)
+        thumb_path = thumb_dir / "5000.jpg"
+        thumb_path.write_bytes(b"\xff\xd8\xff\xe0JFIF" + b"\x00" * 100)
 
-        os.makedirs(thumb_dir, exist_ok=True)
-        try:
-            with open(thumb_path, "wb") as f:
-                f.write(b"\xff\xd8\xff\xe0JFIF" + b"\x00" * 100)
-
+        # Patch settings.THUMBNAIL_DIR so the endpoint looks in our temp dir
+        with patch("main.settings.THUMBNAIL_DIR", str(tmp_path / "thumbnails")):
             r = client.get(
                 f"/thumbnails/{video_id}/5000.jpg",
                 cookies=auth_cookie,
             )
             assert r.status_code == 200
             assert r.headers["content-type"] == "image/jpeg"
-        finally:
-            if os.path.exists(thumb_path):
-                os.remove(thumb_path)
-            if os.path.isdir(thumb_dir):
-                os.rmdir(thumb_dir)
 
     def test_thumbnail_not_found(self, client, auth_cookie):
         """GET /thumbnails/{id}/{ts}.jpg returns 404 when missing."""

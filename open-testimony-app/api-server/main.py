@@ -47,7 +47,14 @@ logger = logging.getLogger(__name__)
 # --- Access log: records every request with client IP ---
 ACCESS_LOG_DIR = os.environ.get("ACCESS_LOG_DIR", "/app/logs")
 ACCESS_LOG_FILE = os.path.join(ACCESS_LOG_DIR, "access.jsonl")
-os.makedirs(ACCESS_LOG_DIR, exist_ok=True)
+try:
+    os.makedirs(ACCESS_LOG_DIR, exist_ok=True)
+except OSError:
+    # Running outside Docker (e.g. tests) where /app doesn't exist —
+    # fall back to a temp directory so the module can still be imported.
+    ACCESS_LOG_DIR = os.path.join(tempfile.gettempdir(), "ot-access-logs")
+    ACCESS_LOG_FILE = os.path.join(ACCESS_LOG_DIR, "access.jsonl")
+    os.makedirs(ACCESS_LOG_DIR, exist_ok=True)
 
 # Dedicated logger that writes JSON lines to the access log file
 _access_logger = logging.getLogger("access_log")

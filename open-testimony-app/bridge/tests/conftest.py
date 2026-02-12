@@ -39,7 +39,15 @@ def db_engine():
     engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        # Create the OT API's videos table (bridge FK target) if missing
+        conn.commit()
+
+    # Drop and recreate all bridge tables so schema always matches current
+    # models (e.g. embedding dimensions). The videos table is owned by the
+    # API but we need it as an FK target, so drop bridge tables first to
+    # avoid FK issues, then recreate everything.
+    Base.metadata.drop_all(bind=engine)
+    with engine.connect() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS videos CASCADE"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS videos (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -68,7 +76,6 @@ def db_engine():
         conn.commit()
     Base.metadata.create_all(bind=engine)
     yield engine
-    Base.metadata.drop_all(bind=engine)
     engine.dispose()
 
 

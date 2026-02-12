@@ -370,7 +370,7 @@ class TestCombinedSearch:
             assert "video_id" in r
             assert "score" in r
             assert "source" in r
-            assert r["source"] in ("visual", "caption")
+            assert r["source"] in ("visual", "caption", "both")
 
     def test_combined_search_dedup(self, client, auth_cookie, db_session):
         """Combined search deduplicates results by (video_id, frame_num) and keeps both scores."""
