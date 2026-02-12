@@ -7,13 +7,16 @@ from sqlalchemy.orm import sessionmaker
 
 from config import settings
 from models import VideoIndexStatus
-from indexing.pipeline import index_video
+from indexing.pipeline import fix_video_indexes
 
 logger = logging.getLogger(__name__)
 
 # Separate engine for the worker (avoids sharing sessions across async boundaries)
 worker_engine = create_engine(settings.DATABASE_URL)
 WorkerSession = sessionmaker(bind=worker_engine)
+
+# All statuses that mean "this video needs work"
+PENDING_STATUSES = ("pending", "pending_visual", "pending_fix")
 
 
 async def indexing_worker():
@@ -26,25 +29,22 @@ async def indexing_worker():
             try:
                 job = (
                     db.query(VideoIndexStatus)
-                    .filter(VideoIndexStatus.status == "pending")
+                    .filter(VideoIndexStatus.status.in_(PENDING_STATUSES))
                     .order_by(VideoIndexStatus.created_at.asc())
                     .first()
                 )
 
                 if job:
                     logger.info(
-                        f"Processing indexing job: video_id={job.video_id}, "
+                        f"Processing job ({job.status}): video_id={job.video_id}, "
                         f"object_name={job.object_name}"
                     )
-                    # Run the CPU/GPU-heavy pipeline in a thread pool
                     await asyncio.to_thread(
-                        index_video,
+                        fix_video_indexes,
                         job.video_id,
                         job.object_name,
                         db,
                     )
-                else:
-                    pass  # No pending jobs
 
             finally:
                 db.close()

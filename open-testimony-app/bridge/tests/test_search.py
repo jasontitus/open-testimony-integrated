@@ -2,23 +2,13 @@
 import os
 import sys
 import uuid
-from unittest.mock import patch, MagicMock
 
 import numpy as np
-import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import CaptionEmbedding, FrameEmbedding, TranscriptEmbedding
 from tests.conftest import insert_video_stub
-
-
-def _make_open_clip_mock():
-    """Create a configured open_clip mock with a tokenizer that returns a real tensor."""
-    mock_oc = MagicMock()
-    mock_tokenizer = MagicMock(return_value=torch.zeros(1, 77, dtype=torch.long))
-    mock_oc.get_tokenizer.return_value = mock_tokenizer
-    return mock_oc
 
 
 class TestVisualTextSearch:
@@ -41,12 +31,11 @@ class TestVisualTextSearch:
             )
         db_session.commit()
 
-        with patch.dict(sys.modules, {"open_clip": _make_open_clip_mock()}):
-            resp = client.get(
-                "/search/visual",
-                params={"q": "a person walking", "limit": 3},
-                cookies=auth_cookie,
-            )
+        resp = client.get(
+            "/search/visual",
+            params={"q": "a person walking", "limit": 3},
+            cookies=auth_cookie,
+        )
 
         assert resp.status_code == 200
         body = resp.json()
@@ -69,12 +58,11 @@ class TestVisualTextSearch:
 
     def test_search_no_results(self, client, auth_cookie):
         """Search with no indexed videos returns empty results."""
-        with patch.dict(sys.modules, {"open_clip": _make_open_clip_mock()}):
-            resp = client.get(
-                "/search/visual",
-                params={"q": "something"},
-                cookies=auth_cookie,
-            )
+        resp = client.get(
+            "/search/visual",
+            params={"q": "something"},
+            cookies=auth_cookie,
+        )
 
         assert resp.status_code == 200
         assert resp.json()["results"] == []
@@ -357,12 +345,11 @@ class TestCombinedSearch:
             )
         db_session.commit()
 
-        with patch.dict(sys.modules, {"open_clip": _make_open_clip_mock()}):
-            resp = client.get(
-                "/search/combined",
-                params={"q": "red hat", "limit": 10},
-                cookies=auth_cookie,
-            )
+        resp = client.get(
+            "/search/combined",
+            params={"q": "red hat", "limit": 10},
+            cookies=auth_cookie,
+        )
 
         assert resp.status_code == 200
         body = resp.json()
@@ -410,12 +397,11 @@ class TestCombinedSearch:
         )
         db_session.commit()
 
-        with patch.dict(sys.modules, {"open_clip": _make_open_clip_mock()}):
-            resp = client.get(
-                "/search/combined",
-                params={"q": "red hat", "limit": 10},
-                cookies=auth_cookie,
-            )
+        resp = client.get(
+            "/search/combined",
+            params={"q": "red hat", "limit": 10},
+            cookies=auth_cookie,
+        )
 
         assert resp.status_code == 200
         body = resp.json()

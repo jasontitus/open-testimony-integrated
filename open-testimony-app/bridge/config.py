@@ -22,10 +22,11 @@ class Settings:
     JWT_ALGORITHM: str = "HS256"
 
     # Vision model
-    # open_clip: "ViT-SO400M-14-SigLIP-384", "ViT-L-14", "ViT-bigG-14", etc.
+    # hf_siglip: "google/siglip2-so400m-patch16-naflex" (NAFlex, native aspect ratio)
+    # open_clip: "ViT-SO400M-14-SigLIP2-378", "ViT-L-14", "ViT-bigG-14", etc.
     # pe_core: "PE-Core-L14-336", "PE-Core-B16-224", "PE-Core-G14-448"
-    VISION_MODEL_FAMILY: str = os.environ.get("VISION_MODEL_FAMILY", "open_clip")
-    VISION_MODEL_NAME: str = os.environ.get("VISION_MODEL_NAME", "ViT-SO400M-14-SigLIP-384")
+    VISION_MODEL_FAMILY: str = os.environ.get("VISION_MODEL_FAMILY", "hf_siglip")
+    VISION_MODEL_NAME: str = os.environ.get("VISION_MODEL_NAME", "google/siglip2-so400m-patch16-naflex")
     VISION_MODEL_PRETRAINED: str = os.environ.get(
         "VISION_MODEL_PRETRAINED", "webli"
     )

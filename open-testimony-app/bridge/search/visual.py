@@ -18,7 +18,18 @@ def encode_text_query(query: str, vision_model, device) -> list[float]:
 
     Returns a normalized embedding vector.
     """
-    if settings.VISION_MODEL_FAMILY == "open_clip":
+    if settings.VISION_MODEL_FAMILY == "hf_siglip":
+        from main import vision_processor
+
+        inputs = vision_processor(
+            text=[query], return_tensors="pt",
+            padding="max_length", max_length=64,
+        ).to(device)
+        with torch.no_grad():
+            text_features = vision_model.get_text_features(**inputs)
+            text_features = torch.nn.functional.normalize(text_features, dim=-1)
+        return text_features.cpu().float().numpy()[0].tolist()
+    elif settings.VISION_MODEL_FAMILY == "open_clip":
         from main import vision_tokenizer
 
         tokens = vision_tokenizer([query]).to(device)
@@ -46,13 +57,20 @@ def encode_image_query(
     Returns a normalized embedding vector.
     """
     img = Image.open(BytesIO(image_bytes)).convert("RGB")
+
+    if settings.VISION_MODEL_FAMILY == "hf_siglip":
+        from main import vision_processor
+
+        inputs = vision_processor(images=img, return_tensors="pt").to(device)
+        with torch.no_grad():
+            features = vision_model.get_image_features(**inputs)
+            features = torch.nn.functional.normalize(features, dim=-1)
+        return features.cpu().float().numpy()[0].tolist()
+
     tensor = preprocess(img).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        if settings.VISION_MODEL_FAMILY == "open_clip":
-            features = vision_model.encode_image(tensor)
-        else:
-            features = vision_model.encode_image(tensor)
+        features = vision_model.encode_image(tensor)
         features = torch.nn.functional.normalize(features, dim=-1)
 
     return features.cpu().float().numpy()[0].tolist()

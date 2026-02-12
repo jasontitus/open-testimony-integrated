@@ -25,6 +25,7 @@ SessionLocal = sessionmaker(bind=engine)
 vision_model = None
 vision_preprocess = None
 vision_tokenizer = None  # callable: list[str] -> Tensor of input_ids
+vision_processor = None  # HF AutoProcessor (used by hf_siglip, handles images + text)
 text_model = None
 caption_model = None
 caption_processor = None
@@ -39,17 +40,30 @@ def get_db():
 
 
 def load_vision_model():
-    """Load the vision model (OpenCLIP or PE-Core) into memory."""
-    global vision_model, vision_preprocess, vision_tokenizer
+    """Load the vision model (HF SigLIP, OpenCLIP, or PE-Core) into memory."""
+    global vision_model, vision_preprocess, vision_tokenizer, vision_processor
     import torch
 
     device = torch.device(settings.DEVICE)
+    device_str = str(device)
     logger.info(
         f"Loading vision model: {settings.VISION_MODEL_FAMILY} / "
         f"{settings.VISION_MODEL_NAME} on {device}"
     )
 
-    if settings.VISION_MODEL_FAMILY == "open_clip":
+    if settings.VISION_MODEL_FAMILY == "hf_siglip":
+        from transformers import AutoModel, AutoProcessor
+
+        processor = AutoProcessor.from_pretrained(settings.VISION_MODEL_NAME)
+        model = AutoModel.from_pretrained(
+            settings.VISION_MODEL_NAME, device_map=device_str
+        )
+        model.eval()
+        vision_model = model
+        vision_processor = processor
+        vision_preprocess = None
+        vision_tokenizer = None
+    elif settings.VISION_MODEL_FAMILY == "open_clip":
         import open_clip
 
         model, _, preprocess = open_clip.create_model_and_transforms(
@@ -310,6 +324,8 @@ async def indexing_overview(
     return {
         "total": sum(counts.values()),
         "pending": counts.get("pending", 0),
+        "pending_visual": counts.get("pending_visual", 0),
+        "pending_fix": counts.get("pending_fix", 0),
         "processing": counts.get("processing", 0),
         "completed": counts.get("completed", 0),
         "failed": counts.get("failed", 0),
@@ -434,6 +450,160 @@ async def reindex_all(
     return {"status": "reindex_all_queued", "count": len(jobs)}
 
 
+@app.post("/indexing/reindex-visual/{video_id}")
+async def reindex_visual_video(
+    video_id: str,
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Re-encode visual embeddings only for a single video (admin).
+
+    Preserves existing caption and transcript embeddings.
+    Use after switching vision models to avoid re-running Gemini/Whisper.
+    Only acts on completed or failed videos — refuses if still pending/processing.
+    """
+    import uuid as uuid_mod
+    from models import FrameEmbedding
+
+    video_uuid = uuid_mod.UUID(video_id)
+
+    job = (
+        db.query(VideoIndexStatus)
+        .filter(VideoIndexStatus.video_id == video_uuid)
+        .first()
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="No indexing job found")
+
+    if job.status in ("pending", "processing"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Video is currently '{job.status}' — wait for full indexing "
+                   f"to finish before visual reindex",
+        )
+
+    # Only clear visual state, leave captions/transcripts intact
+    db.query(FrameEmbedding).filter(FrameEmbedding.video_id == video_uuid).delete()
+    job.status = "pending_visual"
+    job.visual_indexed = False
+    job.frame_count = None
+    job.error_message = None
+    db.commit()
+
+    return {"status": "visual_reindex_queued", "video_id": video_id}
+
+
+@app.post("/indexing/reindex-visual-all")
+async def reindex_visual_all(
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Re-encode visual embeddings for all completed/failed videos (admin).
+
+    Preserves existing caption and transcript embeddings.
+    Use after switching vision models to avoid re-running Gemini/Whisper.
+    Skips videos that are still pending or processing full indexing.
+    """
+    from models import FrameEmbedding
+
+    jobs = db.query(VideoIndexStatus).all()
+    queued = []
+    skipped = []
+
+    for job in jobs:
+        if job.status in ("pending", "processing"):
+            skipped.append(str(job.video_id))
+            continue
+
+        # Delete frame embeddings for this video only
+        db.query(FrameEmbedding).filter(
+            FrameEmbedding.video_id == job.video_id
+        ).delete()
+        job.status = "pending_visual"
+        job.visual_indexed = False
+        job.frame_count = None
+        job.error_message = None
+        queued.append(str(job.video_id))
+
+    db.commit()
+
+    result = {"status": "visual_reindex_all_queued", "queued": len(queued)}
+    if skipped:
+        result["skipped"] = len(skipped)
+        result["skipped_reason"] = "still pending/processing full indexing"
+        result["skipped_video_ids"] = skipped
+    return result
+
+
+@app.post("/indexing/fix/{video_id}")
+async def fix_video(
+    video_id: str,
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Fix missing indexes for a single video (admin).
+
+    Checks which embedding tables have data and only generates what's missing.
+    Does not delete any existing embeddings.
+    """
+    import uuid as uuid_mod
+
+    video_uuid = uuid_mod.UUID(video_id)
+
+    job = (
+        db.query(VideoIndexStatus)
+        .filter(VideoIndexStatus.video_id == video_uuid)
+        .first()
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="No indexing job found")
+
+    if job.status in ("pending", "processing"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Video is currently '{job.status}' — wait for it to finish",
+        )
+
+    job.status = "pending_fix"
+    job.error_message = None
+    db.commit()
+
+    return {"status": "fix_queued", "video_id": video_id}
+
+
+@app.post("/indexing/fix-all")
+async def fix_all(
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Fix missing indexes for all videos (admin).
+
+    Checks each video's embedding tables and only generates what's missing.
+    Skips videos that are still pending or processing.
+    Does not delete any existing embeddings.
+    """
+    jobs = db.query(VideoIndexStatus).all()
+    queued = []
+    skipped = []
+
+    for job in jobs:
+        if job.status in ("pending", "processing"):
+            skipped.append(str(job.video_id))
+            continue
+        job.status = "pending_fix"
+        job.error_message = None
+        queued.append(str(job.video_id))
+
+    db.commit()
+
+    result = {"status": "fix_all_queued", "queued": len(queued)}
+    if skipped:
+        result["skipped"] = len(skipped)
+        result["skipped_reason"] = "still pending/processing"
+        result["skipped_video_ids"] = skipped
+    return result
+
+
 # --- Thumbnail serving ---
 
 
@@ -476,6 +646,7 @@ async def health():
     return {
         "status": "healthy",
         "vision_model_loaded": vision_model is not None,
+        "vision_model_family": settings.VISION_MODEL_FAMILY,
         "text_model_loaded": text_model is not None,
         "caption_model_loaded": caption_model is not None,
         "caption_provider": settings.CAPTION_PROVIDER,

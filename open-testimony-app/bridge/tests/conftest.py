@@ -101,13 +101,19 @@ def db_session(TestingSessionLocal):
 def mock_vision_model():
     """Mock vision model that returns fake embeddings (1152-dim for SigLIP)."""
     model = MagicMock()
-    # OpenCLIP-style encode_image
+    # OpenCLIP-style encode_image / encode_text
     model.encode_image = MagicMock(
         side_effect=lambda x: _fake_tensor(x.shape[0], 1152)
     )
-    # OpenCLIP-style encode_text
     model.encode_text = MagicMock(
         side_effect=lambda x: _fake_tensor(x.shape[0], 1152)
+    )
+    # HF SigLIP-style get_image_features / get_text_features
+    model.get_image_features = MagicMock(
+        side_effect=lambda **kwargs: _fake_tensor(1, 1152)
+    )
+    model.get_text_features = MagicMock(
+        side_effect=lambda **kwargs: _fake_tensor(1, 1152)
     )
     return model
 
@@ -121,6 +127,24 @@ def mock_vision_preprocess():
         return torch.randn(3, 224, 224)
 
     return preprocess
+
+
+@pytest.fixture
+def mock_vision_processor():
+    """Mock HF AutoProcessor for hf_siglip model family."""
+    import torch
+
+    processor = MagicMock()
+    # Calling processor(images=...) or processor(text=...) returns a dict-like
+    # object with .to() that returns itself
+    mock_inputs = MagicMock()
+    mock_inputs.to = MagicMock(return_value=mock_inputs)
+    # Make it iterable for **kwargs unpacking
+    mock_inputs.keys = MagicMock(return_value=["pixel_values"])
+    mock_inputs.__getitem__ = lambda self, key: torch.randn(1, 3, 384, 384)
+    mock_inputs.__iter__ = lambda self: iter(["pixel_values"])
+    processor.return_value = mock_inputs
+    return processor
 
 
 @pytest.fixture
@@ -185,13 +209,14 @@ def _fake_tensor(batch_size, dim):
 
 @pytest.fixture
 def app(TestingSessionLocal, mock_vision_model, mock_vision_preprocess, mock_text_model,
-        mock_caption_model, mock_caption_processor):
+        mock_caption_model, mock_caption_processor, mock_vision_processor):
     """Create a FastAPI test app with mocked models and DB."""
     import main as bridge_main
 
     # Inject mock models
     bridge_main.vision_model = mock_vision_model
     bridge_main.vision_preprocess = mock_vision_preprocess
+    bridge_main.vision_processor = mock_vision_processor
     bridge_main.text_model = mock_text_model
     bridge_main.caption_model = mock_caption_model
     bridge_main.caption_processor = mock_caption_processor

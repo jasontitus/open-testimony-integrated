@@ -8,6 +8,17 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+# Cached Gemini client (reused across all API calls)
+_gemini_client = None
+
+
+def _get_gemini_client():
+    global _gemini_client
+    if _gemini_client is None:
+        from google import genai
+        _gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    return _gemini_client
+
 
 def caption_frame(pil_image: Image.Image, prompt: str, caption_model=None,
                   caption_processor=None, device=None) -> str:
@@ -20,9 +31,7 @@ def caption_frame(pil_image: Image.Image, prompt: str, caption_model=None,
 
 def _caption_gemini(pil_image: Image.Image, prompt: str) -> str:
     """Caption a frame using the Gemini API."""
-    from google import genai
-
-    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    client = _get_gemini_client()
     response = client.models.generate_content(
         model=settings.CAPTION_MODEL_NAME,
         contents=[prompt, pil_image],
@@ -132,7 +141,7 @@ def caption_frames_batch(all_frames, caption_model=None, caption_processor=None,
                 logger.warning(f"Gemini caption failed for frame {frame_num}: {e}")
                 return None
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=16) as executor:
             futures = list(executor.map(_caption_one, all_frames))
         results = [r for r in futures if r is not None]
     else:

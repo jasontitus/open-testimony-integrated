@@ -52,8 +52,8 @@ export MINIO_BUCKET="opentestimony-videos"
 export JWT_SECRET_KEY="change-me-in-production-use-a-real-secret"
 
 # Model configuration
-export VISION_MODEL_FAMILY="open_clip"
-export VISION_MODEL_NAME="ViT-SO400M-14-SigLIP-384"
+export VISION_MODEL_FAMILY="hf_siglip"
+export VISION_MODEL_NAME="google/siglip2-so400m-patch16-naflex"
 export VISION_MODEL_PRETRAINED="webli"
 export VISION_EMBEDDING_DIM="1152"
 export TRANSCRIPT_MODEL_NAME="Qwen/Qwen3-Embedding-8B"
