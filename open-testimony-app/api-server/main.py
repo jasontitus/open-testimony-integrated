@@ -110,6 +110,48 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
+
+def _sync_schema():
+    """Ensure DB columns match model definitions (adds missing columns,
+    fixes nullability). Runs once at import time so the schema is always
+    current without needing a separate migration tool."""
+    from sqlalchemy import inspect as sa_inspect, text as sa_text
+
+    inspector = sa_inspect(engine)
+    with engine.begin() as conn:
+        for table_name, table in Base.metadata.tables.items():
+            if not inspector.has_table(table_name):
+                continue
+            db_columns = {c["name"]: c for c in inspector.get_columns(table_name)}
+            for col in table.columns:
+                if col.name not in db_columns:
+                    # Add missing column
+                    col_type = col.type.compile(engine.dialect)
+                    nullable = "" if col.nullable else " NOT NULL"
+                    default = ""
+                    if col.default is not None and col.default.arg is not None:
+                        default = f" DEFAULT '{col.default.arg}'"
+                    logger.info(f"Schema sync: adding {table_name}.{col.name} ({col_type})")
+                    conn.execute(sa_text(
+                        f'ALTER TABLE {table_name} ADD COLUMN "{col.name}" {col_type}{nullable}{default}'
+                    ))
+                else:
+                    # Fix nullability mismatch
+                    db_col = db_columns[col.name]
+                    if col.nullable and not db_col["nullable"]:
+                        logger.info(f"Schema sync: making {table_name}.{col.name} nullable")
+                        conn.execute(sa_text(
+                            f'ALTER TABLE {table_name} ALTER COLUMN "{col.name}" DROP NOT NULL'
+                        ))
+                    elif not col.nullable and db_col["nullable"] and col.name != "id":
+                        logger.info(f"Schema sync: making {table_name}.{col.name} NOT NULL")
+                        conn.execute(sa_text(
+                            f'ALTER TABLE {table_name} ALTER COLUMN "{col.name}" SET NOT NULL'
+                        ))
+
+
+_sync_schema()
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Open Testimony API",
