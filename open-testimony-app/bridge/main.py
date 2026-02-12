@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
 from config import settings
-from models import Base, VideoIndexStatus
+from models import ActionEmbedding, Base, ClipEmbedding, VideoIndexStatus
 from auth import require_auth
 
 logging.basicConfig(level=logging.INFO)
@@ -226,7 +226,87 @@ def _migrate_embedding_dimensions():
             ))
             conn.commit()
 
-        # Trigram indexes for ILIKE exact-text search on captions and transcripts
+        # Add clip_indexed / clip_count to video_index_status if missing
+        if "clip_indexed" not in col_names:
+            logger.info("Adding clip_indexed column to video_index_status")
+            conn.execute(text(
+                "ALTER TABLE video_index_status ADD COLUMN clip_indexed BOOLEAN DEFAULT false"
+            ))
+        if "clip_count" not in col_names:
+            logger.info("Adding clip_count column to video_index_status")
+            conn.execute(text(
+                "ALTER TABLE video_index_status ADD COLUMN clip_count INTEGER"
+            ))
+        conn.commit()
+
+        # Create clip_embeddings table if missing
+        clip_table_exists = conn.execute(text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'clip_embeddings'
+            )
+        """)).scalar()
+
+        if not clip_table_exists:
+            logger.info("Creating clip_embeddings table")
+            conn.execute(text(f"""
+                CREATE TABLE clip_embeddings (
+                    id BIGSERIAL PRIMARY KEY,
+                    video_id UUID NOT NULL,
+                    start_ms INTEGER NOT NULL,
+                    end_ms INTEGER NOT NULL,
+                    start_frame INTEGER NOT NULL,
+                    end_frame INTEGER NOT NULL,
+                    num_frames INTEGER NOT NULL,
+                    embedding vector({settings.VISION_EMBEDDING_DIM}),
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_clip_embeddings_video_id "
+                "ON clip_embeddings (video_id)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS clip_emb_hnsw "
+                "ON clip_embeddings USING hnsw (embedding vector_cosine_ops)"
+            ))
+            conn.commit()
+
+        # Create action_embeddings table if missing
+        action_table_exists = conn.execute(text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'action_embeddings'
+            )
+        """)).scalar()
+
+        if not action_table_exists:
+            logger.info("Creating action_embeddings table")
+            conn.execute(text(f"""
+                CREATE TABLE action_embeddings (
+                    id BIGSERIAL PRIMARY KEY,
+                    video_id UUID NOT NULL,
+                    start_ms INTEGER NOT NULL,
+                    end_ms INTEGER NOT NULL,
+                    start_frame INTEGER NOT NULL,
+                    end_frame INTEGER NOT NULL,
+                    num_frames INTEGER NOT NULL,
+                    action_text TEXT NOT NULL,
+                    embedding vector({settings.TRANSCRIPT_EMBEDDING_DIM}),
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_action_embeddings_video_id "
+                "ON action_embeddings (video_id)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS action_emb_hnsw "
+                "ON action_embeddings USING hnsw (embedding vector_cosine_ops)"
+            ))
+            conn.commit()
+
+        # Trigram indexes for ILIKE exact-text search on captions, transcripts, and actions
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_caption_text_trgm "
@@ -235,6 +315,10 @@ def _migrate_embedding_dimensions():
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_transcript_text_trgm "
             "ON transcript_embeddings USING gin (segment_text gin_trgm_ops)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_action_text_trgm "
+            "ON action_embeddings USING gin (action_text gin_trgm_ops)"
         ))
         conn.commit()
 
@@ -371,9 +455,11 @@ async def indexing_status_for_video(
         "visual_indexed": job.visual_indexed,
         "transcript_indexed": job.transcript_indexed,
         "caption_indexed": job.caption_indexed,
+        "clip_indexed": job.clip_indexed,
         "frame_count": job.frame_count,
         "segment_count": job.segment_count,
         "caption_count": job.caption_count,
+        "clip_count": job.clip_count,
         "error_message": job.error_message,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
@@ -408,15 +494,19 @@ async def reindex_video(
     db.query(CaptionEmbedding).filter(
         CaptionEmbedding.video_id == video_uuid
     ).delete()
+    db.query(ClipEmbedding).filter(ClipEmbedding.video_id == video_uuid).delete()
+    db.query(ActionEmbedding).filter(ActionEmbedding.video_id == video_uuid).delete()
 
     # Reset job to pending
     job.status = "pending"
     job.visual_indexed = False
     job.transcript_indexed = False
     job.caption_indexed = False
+    job.clip_indexed = False
     job.frame_count = None
     job.segment_count = None
     job.caption_count = None
+    job.clip_count = None
     job.error_message = None
     job.completed_at = None
     db.commit()
@@ -435,6 +525,8 @@ async def reindex_all(
     db.query(FrameEmbedding).delete()
     db.query(TranscriptEmbedding).delete()
     db.query(CaptionEmbedding).delete()
+    db.query(ClipEmbedding).delete()
+    db.query(ActionEmbedding).delete()
 
     # Create index jobs for any videos in the videos table that have no index status entry
     missing = db.execute(
@@ -457,9 +549,11 @@ async def reindex_all(
         job.visual_indexed = False
         job.transcript_indexed = False
         job.caption_indexed = False
+        job.clip_indexed = False
         job.frame_count = None
         job.segment_count = None
         job.caption_count = None
+        job.clip_count = None
         job.error_message = None
         job.completed_at = None
     db.commit()
@@ -668,4 +762,8 @@ async def health():
         "caption_model_loaded": caption_model is not None,
         "caption_provider": settings.CAPTION_PROVIDER,
         "caption_model_name": settings.CAPTION_MODEL_NAME,
+        "clip_enabled": settings.CLIP_ENABLED,
+        "clip_window_frames": settings.CLIP_WINDOW_FRAMES,
+        "clip_window_stride": settings.CLIP_WINDOW_STRIDE,
+        "clip_fps": settings.CLIP_FPS,
     }
