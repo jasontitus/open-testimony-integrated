@@ -56,6 +56,37 @@ class CaptionEmbedding(Base):
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
 
 
+class ClipEmbedding(Base):
+    """Vision embedding for a temporal clip window (mean-pooled across frames)."""
+    __tablename__ = "clip_embeddings"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    video_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    start_ms = Column(Integer, nullable=False)
+    end_ms = Column(Integer, nullable=False)
+    start_frame = Column(Integer, nullable=False)
+    end_frame = Column(Integer, nullable=False)
+    num_frames = Column(Integer, nullable=False)
+    embedding = Column(Vector(settings.VISION_EMBEDDING_DIM))
+    created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
+
+
+class ActionEmbedding(Base):
+    """Text embedding of a temporal action caption for a clip window."""
+    __tablename__ = "action_embeddings"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    video_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    start_ms = Column(Integer, nullable=False)
+    end_ms = Column(Integer, nullable=False)
+    start_frame = Column(Integer, nullable=False)
+    end_frame = Column(Integer, nullable=False)
+    num_frames = Column(Integer, nullable=False)
+    action_text = Column(Text, nullable=False)
+    embedding = Column(Vector(settings.TRANSCRIPT_EMBEDDING_DIM))
+    created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
+
+
 class VideoIndexStatus(Base):
     __tablename__ = "video_index_status"
 
@@ -68,9 +99,11 @@ class VideoIndexStatus(Base):
     visual_indexed = Column(Boolean, default=False)
     transcript_indexed = Column(Boolean, default=False)
     caption_indexed = Column(Boolean, default=False)
+    clip_indexed = Column(Boolean, default=False)
     frame_count = Column(Integer, nullable=True)
     segment_count = Column(Integer, nullable=True)
     caption_count = Column(Integer, nullable=True)
+    clip_count = Column(Integer, nullable=True)
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
     completed_at = Column(DateTime(timezone=True), nullable=True)

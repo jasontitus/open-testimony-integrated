@@ -252,11 +252,131 @@ async def caption_search(
     }
 
 
+def _clip_visual_encode_and_search(q, db, limit):
+    """Run clip visual text encoding + DB search under the vision lock."""
+    from main import vision_model, vision_lock
+    from search.visual import encode_text_query
+    from search.clip import search_clips_visual
+
+    device = torch.device(settings.DEVICE)
+    with vision_lock:
+        query_embedding = encode_text_query(q, vision_model, device)
+    t_encode = time.time()
+    results = search_clips_visual(query_embedding, db, limit)
+    t_search = time.time()
+    return results, t_encode, t_search
+
+
+@router.get("/clips")
+async def clip_visual_search(
+    q: str = Query(..., min_length=1, description="Text query for clip-level visual search"),
+    limit: int = Query(20, ge=1, le=100),
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Clip-level visual search: encode query with vision model, find similar temporal windows.
+
+    Uses mean-pooled frame embeddings across overlapping clip windows to capture
+    motion and temporal content that single-frame search misses.
+    """
+    t0 = time.time()
+    results, t_encode, t_search = await asyncio.to_thread(
+        _clip_visual_encode_and_search, q, db, limit
+    )
+    logger.info(f"clip_visual q={q!r}: encode={t_encode-t0:.3f}s db={t_search-t_encode:.3f}s total={t_search-t0:.3f}s")
+    return {
+        "query": q,
+        "mode": "clip_visual",
+        "timing": {
+            "encode_ms": _ms(t0, t_encode),
+            "clip_search_ms": _ms(t_encode, t_search),
+            "total_ms": _ms(t0, t_search),
+        },
+        "results": results,
+    }
+
+
+def _action_encode_and_search(q, db, limit):
+    """Run action text encoding + DB search under the text lock."""
+    from main import text_model, text_lock
+    from search.clip import encode_action_query, search_actions_semantic
+
+    with text_lock:
+        query_embedding = encode_action_query(q, text_model)
+    t_encode = time.time()
+    results = search_actions_semantic(query_embedding, db, limit)
+    t_search = time.time()
+    return results, t_encode, t_search
+
+
+@router.get("/actions")
+async def action_search(
+    q: str = Query(..., min_length=1, description="Text query for action/motion search"),
+    limit: int = Query(20, ge=1, le=100),
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Search for actions and physical interactions across video clips.
+
+    Searches temporal action captions generated from overlapping frame windows.
+    Use queries like 'chokehold', 'pushing', 'use of force', 'person being restrained'.
+    """
+    t0 = time.time()
+    results, t_encode, t_search = await asyncio.to_thread(
+        _action_encode_and_search, q, db, limit
+    )
+    logger.info(f"action q={q!r}: encode={t_encode-t0:.3f}s db={t_search-t_encode:.3f}s total={t_search-t0:.3f}s")
+    return {
+        "query": q,
+        "mode": "action_semantic",
+        "timing": {
+            "encode_ms": _ms(t0, t_encode),
+            "action_search_ms": _ms(t_encode, t_search),
+            "total_ms": _ms(t0, t_search),
+        },
+        "results": results,
+    }
+
+
+def _action_exact_search(q, db, limit):
+    """Run exact action caption search (no model, just DB)."""
+    from search.clip import search_actions_exact
+
+    results = search_actions_exact(q, db, limit)
+    t_search = time.time()
+    return results, t_search
+
+
+@router.get("/actions/exact")
+async def action_exact_search(
+    q: str = Query(..., min_length=1, description="Text query for exact action search"),
+    limit: int = Query(20, ge=1, le=100),
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Exact text search on temporal action captions (case-insensitive)."""
+    t0 = time.time()
+    results, t_search = await asyncio.to_thread(
+        _action_exact_search, q, db, limit
+    )
+    logger.info(f"action_exact q={q!r}: db={t_search-t0:.3f}s")
+    return {
+        "query": q,
+        "mode": "action_exact",
+        "timing": {
+            "search_ms": _ms(t0, t_search),
+            "total_ms": _ms(t0, t_search),
+        },
+        "results": results,
+    }
+
+
 def _combined_encode_and_search(q, db, limit):
-    """Run combined visual+caption encoding and search under locks."""
+    """Run combined visual+caption+action encoding and search under locks."""
     from main import vision_model, text_model, vision_lock, text_lock
     from search.visual import encode_text_query, search_visual
     from search.caption import encode_caption_query, search_captions
+    from search.clip import search_clips_visual, search_actions_semantic
 
     device = torch.device(settings.DEVICE)
 
@@ -273,7 +393,15 @@ def _combined_encode_and_search(q, db, limit):
     caption_results = search_captions(caption_embedding, db, limit)
     t_caption = time.time()
 
-    return visual_results, caption_results, t_encode, t_visual, t_caption
+    # Clip-level searches (use same embeddings — vision for clips, text for actions)
+    clip_results = []
+    action_results = []
+    if settings.CLIP_ENABLED:
+        clip_results = search_clips_visual(visual_embedding, db, limit)
+        action_results = search_actions_semantic(caption_embedding, db, limit)
+    t_clips = time.time()
+
+    return visual_results, caption_results, clip_results, action_results, t_encode, t_visual, t_caption, t_clips
 
 
 @router.get("/combined")
@@ -283,10 +411,11 @@ async def combined_search(
     _user: dict = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
-    """Combined search: query both visual (SigLIP) and caption paths, merge and rank."""
+    """Combined search: query visual, caption, clip, and action paths, merge and rank."""
     t0 = time.time()
 
-    visual_results, caption_results, t_encode, t_visual, t_caption = (
+    (visual_results, caption_results, clip_results, action_results,
+     t_encode, t_visual, t_caption, t_clips) = (
         await asyncio.to_thread(_combined_encode_and_search, q, db, limit)
     )
 
@@ -301,8 +430,14 @@ async def combined_search(
     for rank, r in enumerate(caption_results):
         r["source"] = "caption"
         r["rrf_score"] = 1.0 / (RRF_K + rank + 1)
+    for rank, r in enumerate(clip_results):
+        r["source"] = "clip"
+        r["rrf_score"] = 1.0 / (RRF_K + rank + 1)
+    for rank, r in enumerate(action_results):
+        r["source"] = "action"
+        r["rrf_score"] = 1.0 / (RRF_K + rank + 1)
 
-    # Merge and deduplicate by (video_id, frame_num)
+    # Merge frame-level results by (video_id, frame_num)
     merged = {}
     for r in visual_results:
         key = (r["video_id"], r.get("frame_num"))
@@ -312,13 +447,31 @@ async def combined_search(
         key = (r["video_id"], r.get("frame_num"))
         if key in merged:
             existing = merged[key]
-            # Same frame in both indexes — sum RRF scores, keep both raw scores
             existing["rrf_score"] += r["rrf_score"]
             existing["caption_score"] = r["score"]
             existing["caption_text"] = r.get("caption_text")
             existing["source"] = "both"
         else:
             merged[key] = {**r, "visual_score": None, "caption_score": r["score"]}
+
+    # Merge clip-level results by (video_id, start_ms) — these are temporal ranges
+    for r in clip_results:
+        key = (r["video_id"], f"clip_{r['start_ms']}")
+        if key not in merged:
+            merged[key] = {**r, "visual_score": r["score"], "caption_score": None}
+        else:
+            merged[key]["rrf_score"] += r["rrf_score"]
+
+    for r in action_results:
+        key = (r["video_id"], f"clip_{r['start_ms']}")
+        if key in merged:
+            existing = merged[key]
+            existing["rrf_score"] += r["rrf_score"]
+            existing["action_text"] = r.get("action_text")
+            if existing["source"] == "clip":
+                existing["source"] = "clip+action"
+        else:
+            merged[key] = {**r, "visual_score": None, "caption_score": None}
 
     # Sort by RRF score descending, take top N
     results = sorted(merged.values(), key=lambda x: x["rrf_score"], reverse=True)[:limit]
@@ -331,7 +484,7 @@ async def combined_search(
     t_end = time.time()
     logger.info(
         f"combined q={q!r}: encode={t_encode-t0:.3f}s visual={t_visual-t_encode:.3f}s "
-        f"caption={t_caption-t_visual:.3f}s total={t_end-t0:.3f}s"
+        f"caption={t_caption-t_visual:.3f}s clips={t_clips-t_caption:.3f}s total={t_end-t0:.3f}s"
     )
     return {
         "query": q,
@@ -340,6 +493,7 @@ async def combined_search(
             "encode_ms": _ms(t0, t_encode),
             "visual_search_ms": _ms(t_encode, t_visual),
             "caption_search_ms": _ms(t_visual, t_caption),
+            "clip_search_ms": _ms(t_caption, t_clips),
             "total_ms": _ms(t0, t_end),
         },
         "results": results,

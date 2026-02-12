@@ -112,6 +112,11 @@ services:
       - BATCH_SIZE=16
       - WORKER_POLL_INTERVAL=10
       - OT_API_URL=http://api:8000
+      # Video clip understanding (temporal windows for action/motion detection)
+      - CLIP_ENABLED=true
+      - CLIP_WINDOW_FRAMES=16
+      - CLIP_WINDOW_STRIDE=8
+      - CLIP_FPS=4.0
     depends_on:
       - db
       - minio

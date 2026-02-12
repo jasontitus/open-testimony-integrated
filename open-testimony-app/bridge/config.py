@@ -59,6 +59,27 @@ class Settings:
     # Whisper model
     WHISPER_MODEL: str = os.environ.get("WHISPER_MODEL", "large-v3")
 
+    # Video clip understanding (overlapping temporal windows)
+    # Enable clip-level indexing for action/motion detection
+    CLIP_ENABLED: bool = os.environ.get("CLIP_ENABLED", "true").lower() == "true"
+    # Number of frames per clip window
+    CLIP_WINDOW_FRAMES: int = int(os.environ.get("CLIP_WINDOW_FRAMES", "16"))
+    # How many frames to slide forward between windows (overlap = window - stride)
+    CLIP_WINDOW_STRIDE: int = int(os.environ.get("CLIP_WINDOW_STRIDE", "8"))
+    # FPS for clip frame extraction (higher than FRAME_INTERVAL_SEC for temporal detail)
+    CLIP_FPS: float = float(os.environ.get("CLIP_FPS", "4.0"))
+    # Prompt for temporal action captioning (sent with multi-frame sequences to Gemini)
+    CLIP_ACTION_PROMPT: str = os.environ.get(
+        "CLIP_ACTION_PROMPT",
+        "These images are consecutive frames from a video clip spanning a few seconds. "
+        "Describe the physical ACTIONS and MOTION happening across these frames. "
+        "Focus specifically on: body movements, physical interactions between people "
+        "(pushing, grabbing, striking, restraining, choking), use of force, "
+        "aggressive gestures, people falling or being thrown, and any rapid changes in posture. "
+        "If no significant action is visible, say 'no significant action'. "
+        "Be specific about who is doing what to whom.",
+    )
+
     # Processing
     DEVICE: str = os.environ.get("DEVICE", "cpu")
     USE_FP16: bool = os.environ.get("USE_FP16", "false").lower() == "true"
