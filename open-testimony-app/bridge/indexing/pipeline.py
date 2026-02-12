@@ -79,6 +79,8 @@ def encode_frames_batch(frames, vision_model, preprocess, device):
         inputs = vision_processor(images=frames, return_tensors="pt").to(device)
         with torch.no_grad():
             features = vision_model.get_image_features(**inputs)
+            if not isinstance(features, torch.Tensor):
+                features = features.pooler_output
             features = torch.nn.functional.normalize(features, dim=-1)
         return features.cpu().float().numpy()
 
@@ -149,6 +151,7 @@ def encode_transcript_segments(segments, text_model):
 def _store_frame_embeddings(video_id, all_frames, db, device):
     """Batch-encode frames with the vision model and insert into frame_embeddings.
 
+    Acquires vision_lock per batch so search queries can interleave.
     Returns the number of frames stored.
     """
     import main as bridge_main
@@ -160,12 +163,13 @@ def _store_frame_embeddings(video_id, all_frames, db, device):
         frame_meta.append((frame_num, timestamp_ms))
 
         if len(frame_batch) >= settings.BATCH_SIZE:
-            embeddings = encode_frames_batch(
-                frame_batch,
-                bridge_main.vision_model,
-                bridge_main.vision_preprocess,
-                device,
-            )
+            with bridge_main.vision_lock:
+                embeddings = encode_frames_batch(
+                    frame_batch,
+                    bridge_main.vision_model,
+                    bridge_main.vision_preprocess,
+                    device,
+                )
             for i, (fn, ts) in enumerate(frame_meta):
                 db.add(FrameEmbedding(
                     video_id=video_id, frame_num=fn,
@@ -176,12 +180,13 @@ def _store_frame_embeddings(video_id, all_frames, db, device):
             frame_meta.clear()
 
     if frame_batch:
-        embeddings = encode_frames_batch(
-            frame_batch,
-            bridge_main.vision_model,
-            bridge_main.vision_preprocess,
-            device,
-        )
+        with bridge_main.vision_lock:
+            embeddings = encode_frames_batch(
+                frame_batch,
+                bridge_main.vision_model,
+                bridge_main.vision_preprocess,
+                device,
+            )
         for i, (fn, ts) in enumerate(frame_meta):
             db.add(FrameEmbedding(
                 video_id=video_id, frame_num=fn,
@@ -218,12 +223,13 @@ def _store_caption_embeddings(video_id, all_frames, db, device):
     if captions:
         caption_texts = [c[2] for c in captions]
         t2 = _time.perf_counter()
-        caption_embs = bridge_main.text_model.encode(
-            caption_texts,
-            convert_to_numpy=True,
-            show_progress_bar=False,
-            normalize_embeddings=True,
-        )
+        with bridge_main.text_lock:
+            caption_embs = bridge_main.text_model.encode(
+                caption_texts,
+                convert_to_numpy=True,
+                show_progress_bar=False,
+                normalize_embeddings=True,
+            )
         t3 = _time.perf_counter()
         logger.info(f"Caption embedding took {t3-t2:.1f}s for {len(caption_texts)} texts")
         for i, (fn, ts, cap_text) in enumerate(captions):
@@ -248,7 +254,8 @@ def _store_transcript_embeddings(video_id, local_path, db):
 
     segments = transcribe_video(local_path)
     if segments:
-        embeddings = encode_transcript_segments(segments, bridge_main.text_model)
+        with bridge_main.text_lock:
+            embeddings = encode_transcript_segments(segments, bridge_main.text_model)
         for i, seg in enumerate(segments):
             db.add(TranscriptEmbedding(
                 video_id=video_id, segment_text=seg["text"],

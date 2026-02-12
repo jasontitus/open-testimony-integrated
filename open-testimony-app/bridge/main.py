@@ -1,6 +1,7 @@
 """AI Search Bridge Service — connects Open Testimony with VideoIndexer AI models."""
 import asyncio
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, HTTPException
@@ -29,6 +30,10 @@ vision_processor = None  # HF AutoProcessor (used by hf_siglip, handles images +
 text_model = None
 caption_model = None
 caption_processor = None
+
+# Locks to serialize model inference so search and indexing can interleave
+vision_lock = threading.Lock()
+text_lock = threading.Lock()
 
 
 def get_db():

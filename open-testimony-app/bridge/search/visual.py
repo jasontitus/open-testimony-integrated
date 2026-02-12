@@ -27,6 +27,8 @@ def encode_text_query(query: str, vision_model, device) -> list[float]:
         ).to(device)
         with torch.no_grad():
             text_features = vision_model.get_text_features(**inputs)
+            if not isinstance(text_features, torch.Tensor):
+                text_features = text_features.pooler_output
             text_features = torch.nn.functional.normalize(text_features, dim=-1)
         return text_features.cpu().float().numpy()[0].tolist()
     elif settings.VISION_MODEL_FAMILY == "open_clip":
@@ -64,6 +66,8 @@ def encode_image_query(
         inputs = vision_processor(images=img, return_tensors="pt").to(device)
         with torch.no_grad():
             features = vision_model.get_image_features(**inputs)
+            if not isinstance(features, torch.Tensor):
+                features = features.pooler_output
             features = torch.nn.functional.normalize(features, dim=-1)
         return features.cpu().float().numpy()[0].tolist()
 
