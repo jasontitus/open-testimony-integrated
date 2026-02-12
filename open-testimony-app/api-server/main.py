@@ -8,12 +8,14 @@ import json
 import logging
 import os
 import tempfile
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 from io import BytesIO
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Response
+from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException, Depends, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from cryptography.hazmat.primitives import hashes, serialization
@@ -42,6 +44,62 @@ _default_tags: list[str] = []
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --- Access log: records every request with client IP ---
+ACCESS_LOG_DIR = os.environ.get("ACCESS_LOG_DIR", "/app/logs")
+ACCESS_LOG_FILE = os.path.join(ACCESS_LOG_DIR, "access.jsonl")
+os.makedirs(ACCESS_LOG_DIR, exist_ok=True)
+
+# Dedicated logger that writes JSON lines to the access log file
+_access_logger = logging.getLogger("access_log")
+_access_logger.setLevel(logging.INFO)
+_access_logger.propagate = False
+_access_handler = logging.FileHandler(ACCESS_LOG_FILE)
+_access_handler.setFormatter(logging.Formatter("%(message)s"))
+_access_logger.addHandler(_access_handler)
+
+
+def _get_client_ip(request: Request) -> str:
+    """Extract the real client IP, respecting proxy headers set by nginx."""
+    # X-Real-IP is set by our nginx config
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+    # Fallback to first entry in X-Forwarded-For
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    # Direct connection (no proxy)
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+class AccessLogMiddleware(BaseHTTPMiddleware):
+    """Logs every request to a JSONL file with client IP, path, query, and timing."""
+
+    async def dispatch(self, request: Request, call_next):
+        start = time.time()
+        client_ip = _get_client_ip(request)
+
+        response = await call_next(request)
+
+        duration_ms = round((time.time() - start) * 1000, 1)
+
+        entry = {
+            "ts": datetime.utcnow().isoformat() + "Z",
+            "ip": client_ip,
+            "method": request.method,
+            "path": request.url.path,
+            "query": str(request.url.query) if request.url.query else None,
+            "status": response.status_code,
+            "duration_ms": duration_ms,
+            "user_agent": request.headers.get("user-agent"),
+        }
+        _access_logger.info(json.dumps(entry, separators=(",", ":")))
+
+        return response
+
+
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
@@ -60,6 +118,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Access logging middleware — logs every request with client IP to access.jsonl
+app.add_middleware(AccessLogMiddleware)
 
 
 @app.on_event("startup")
