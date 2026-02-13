@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from models import (
-    ActionEmbedding, CaptionEmbedding, ClipEmbedding, FrameEmbedding,
-    TranscriptEmbedding, VideoIndexStatus,
+    ActionEmbedding, CaptionEmbedding, ClipEmbedding, FaceDetection,
+    FrameEmbedding, TranscriptEmbedding, VideoIndexStatus,
 )
 from minio_utils import download_video
 
@@ -420,6 +420,31 @@ def _store_clip_embeddings(video_id, local_path, db, device):
     return total
 
 
+def _store_face_detections(video_id, all_frames, db):
+    """Detect faces in frames, generate embeddings, save thumbnails.
+
+    Returns the number of faces stored.
+    """
+    import time as _time
+    from indexing.face_clustering import detect_and_embed_faces, assign_faces_incremental
+
+    logger.info(f"Running face detection for {video_id} on {len(all_frames)} frames")
+    t0 = _time.perf_counter()
+
+    face_count = detect_and_embed_faces(video_id, all_frames, db)
+
+    t1 = _time.perf_counter()
+    logger.info(f"Face detection took {t1-t0:.1f}s — {face_count} faces found")
+
+    # Incremental assignment to existing clusters
+    if face_count > 0:
+        assigned = assign_faces_incremental(video_id, db)
+        t2 = _time.perf_counter()
+        logger.info(f"Incremental face assignment took {t2-t1:.1f}s — {assigned} faces assigned")
+
+    return face_count
+
+
 def _store_transcript_embeddings(video_id, local_path, db):
     """Transcribe video and embed transcript segments.
 
@@ -488,6 +513,9 @@ def fix_video_indexes(video_id: str, object_name: str, db: Session):
         has_clips = db.query(ClipEmbedding).filter(
             ClipEmbedding.video_id == video_id
         ).count()
+        has_faces = db.query(FaceDetection).filter(
+            FaceDetection.video_id == video_id
+        ).count()
 
         # Use both the actual DB count AND the job flag to decide what's needed.
         # The flag means "we already ran this stage" — even if the result was 0 rows
@@ -498,7 +526,9 @@ def fix_video_indexes(video_id: str, object_name: str, db: Session):
         need_transcript = has_transcript == 0 and not job.transcript_indexed
         need_clips = (has_clips == 0 and not job.clip_indexed
                       and settings.CLIP_ENABLED)
-        need_frames = need_visual or need_captions  # frame extraction needed for both
+        need_faces = (has_faces == 0 and not job.face_indexed
+                      and settings.FACE_CLUSTERING_ENABLED)
+        need_frames = need_visual or need_captions or need_faces
 
         todo = []
         if need_visual:
@@ -509,6 +539,8 @@ def fix_video_indexes(video_id: str, object_name: str, db: Session):
             todo.append("transcript")
         if need_clips:
             todo.append("clips")
+        if need_faces:
+            todo.append("faces")
 
         if not todo:
             logger.info(f"[fix] {video_id}: all indexes present, nothing to do")
@@ -522,6 +554,9 @@ def fix_video_indexes(video_id: str, object_name: str, db: Session):
             if settings.CLIP_ENABLED:
                 job.clip_indexed = True
                 job.clip_count = has_clips
+            if settings.FACE_CLUSTERING_ENABLED:
+                job.face_indexed = True
+                job.face_count = has_faces
             job.status = "completed"
             job.completed_at = datetime.utcnow()
             db.commit()
@@ -585,6 +620,17 @@ def fix_video_indexes(video_id: str, object_name: str, db: Session):
         elif settings.CLIP_ENABLED:
             job.clip_indexed = True
             job.clip_count = has_clips
+
+        # Stage 5: Face detection + embedding + incremental clustering
+        if need_faces:
+            face_count_stored = _store_face_detections(video_id, all_frames, db)
+            job.face_indexed = True
+            job.face_count = face_count_stored
+            db.commit()
+            logger.info(f"[fix] Faces: stored {face_count_stored} face detections")
+        elif settings.FACE_CLUSTERING_ENABLED:
+            job.face_indexed = True
+            job.face_count = has_faces
 
         job.status = "completed"
         job.completed_at = datetime.utcnow()

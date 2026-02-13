@@ -629,14 +629,21 @@ function TagManagement() {
 
 function IndexingManagement() {
   const [stats, setStats] = useState(null);
+  const [faceStats, setFaceStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reindexing, setReindexing] = useState(false);
+  const [reprocessingFaces, setReprocessingFaces] = useState(false);
+  const [reclusteringFaces, setReclusteringFaces] = useState(false);
   const [message, setMessage] = useState(null);
 
   const fetchStats = useCallback(async () => {
     try {
-      const res = await aiApi.get('/indexing/status');
-      setStats(res.data);
+      const [indexRes, faceRes] = await Promise.all([
+        aiApi.get('/indexing/status'),
+        aiApi.get('/faces/stats').catch(() => ({ data: null })),
+      ]);
+      setStats(indexRes.data);
+      setFaceStats(faceRes.data);
     } catch (err) {
       console.error('Failed to load indexing stats:', err);
     } finally {
@@ -679,14 +686,62 @@ function IndexingManagement() {
           <Database size={20} className="text-purple-400" />
           <h2 className="text-xl font-bold text-white">AI Indexing</h2>
         </div>
-        <button
-          onClick={handleReindexAll}
-          disabled={reindexing}
-          className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-purple-800 text-white text-sm font-medium rounded-lg transition"
-        >
-          <RefreshCw size={14} className={reindexing ? 'animate-spin' : ''} />
-          {reindexing ? 'Queuing...' : 'Re-index All Videos'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleReindexAll}
+            disabled={reindexing}
+            className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-purple-800 text-white text-sm font-medium rounded-lg transition"
+          >
+            <RefreshCw size={14} className={reindexing ? 'animate-spin' : ''} />
+            {reindexing ? 'Queuing...' : 'Re-index All Videos'}
+          </button>
+          {faceStats?.enabled && (
+            <>
+              <button
+                onClick={async () => {
+                  if (!window.confirm('Re-process all faces? This will delete existing face data and re-detect faces in all videos.')) return;
+                  setReprocessingFaces(true);
+                  setMessage(null);
+                  try {
+                    const res = await aiApi.post('/faces/reprocess-all');
+                    setMessage({ type: 'success', text: `Queued ${res.data.queued} videos for face re-processing` });
+                    fetchStats();
+                  } catch (err) {
+                    setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to trigger face reprocess' });
+                  } finally {
+                    setReprocessingFaces(false);
+                  }
+                }}
+                disabled={reprocessingFaces}
+                className="flex items-center gap-1.5 px-4 py-2 bg-orange-600 hover:bg-orange-500 disabled:bg-orange-800 text-white text-sm font-medium rounded-lg transition"
+              >
+                <RefreshCw size={14} className={reprocessingFaces ? 'animate-spin' : ''} />
+                {reprocessingFaces ? 'Queuing...' : 'Re-process Faces'}
+              </button>
+              <button
+                onClick={async () => {
+                  if (!window.confirm('Run full face re-clustering? This may take a while for large datasets.')) return;
+                  setReclusteringFaces(true);
+                  setMessage(null);
+                  try {
+                    const res = await aiApi.post('/faces/recluster');
+                    setMessage({ type: 'success', text: `Re-clustering complete: ${res.data.num_clusters} clusters found, ${res.data.num_noise} noise faces` });
+                    fetchStats();
+                  } catch (err) {
+                    setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to trigger face re-clustering' });
+                  } finally {
+                    setReclusteringFaces(false);
+                  }
+                }}
+                disabled={reclusteringFaces}
+                className="flex items-center gap-1.5 px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-teal-800 text-white text-sm font-medium rounded-lg transition"
+              >
+                <RefreshCw size={14} className={reclusteringFaces ? 'animate-spin' : ''} />
+                {reclusteringFaces ? 'Clustering...' : 'Re-cluster Faces'}
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {message && (
@@ -714,6 +769,29 @@ function IndexingManagement() {
               </div>
             ))}
           </div>
+          {faceStats?.enabled && (
+            <div className="mt-4 pt-4 border-t border-gray-700">
+              <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-3">Face Clustering</p>
+              <div className="grid grid-cols-4 gap-4">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-orange-400">{faceStats.total_clusters}</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">People</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-teal-400">{faceStats.total_faces}</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Faces</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-blue-400">{faceStats.assigned_faces}</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Assigned</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-gray-400">{faceStats.unassigned_faces}</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Unassigned</div>
+                </div>
+              </div>
+            </div>
+          )}
           <p className="text-[10px] text-gray-600 mt-3">
             The bridge service polls for pending jobs every 10 seconds. Re-indexing clears all embeddings and re-queues every video.
           </p>

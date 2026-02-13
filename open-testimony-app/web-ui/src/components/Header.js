@@ -1,8 +1,8 @@
 import React from 'react';
 import { useAuth } from '../auth';
-import { Map as MapIcon, List, LogOut, Users, Search, ClipboardList } from 'lucide-react';
+import { Map as MapIcon, List, LogOut, Users, Search, ClipboardList, ScanFace } from 'lucide-react';
 
-export default function Header({ viewMode, setViewMode, showAdmin, onToggleAdmin }) {
+export default function Header({ viewMode, setViewMode, showAdmin, onToggleAdmin, facesEnabled }) {
   const { user, logout } = useAuth();
 
   const roleBadgeClass = user?.role === 'admin'
@@ -47,6 +47,15 @@ export default function Header({ viewMode, setViewMode, showAdmin, onToggleAdmin
               <ClipboardList size={18} />
               <span className="hidden sm:inline">Queue</span>
             </button>
+            {facesEnabled && (
+              <button
+                onClick={() => setViewMode('faces')}
+                className={`flex items-center space-x-2 px-4 py-1.5 rounded-md transition ${viewMode === 'faces' ? 'bg-orange-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
+              >
+                <ScanFace size={18} />
+                <span className="hidden sm:inline">Faces</span>
+              </button>
+            )}
           </div>
         )}
 

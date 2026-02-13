@@ -12,7 +12,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
 from config import settings
-from models import ActionEmbedding, Base, ClipEmbedding, SearchQuery, VideoIndexStatus
+from models import (
+    ActionEmbedding, Base, ClipEmbedding, FaceCluster, FaceDetection,
+    SearchQuery, VideoIndexStatus,
+)
 from auth import require_auth
 
 logging.basicConfig(level=logging.INFO)
@@ -342,6 +345,78 @@ def _migrate_embedding_dimensions():
         ))
         conn.commit()
 
+        # Face clustering tables + columns
+        if "face_indexed" not in col_names:
+            logger.info("Adding face_indexed column to video_index_status")
+            conn.execute(text(
+                "ALTER TABLE video_index_status ADD COLUMN face_indexed BOOLEAN DEFAULT false"
+            ))
+        if "face_count" not in col_names:
+            logger.info("Adding face_count column to video_index_status")
+            conn.execute(text(
+                "ALTER TABLE video_index_status ADD COLUMN face_count INTEGER"
+            ))
+        conn.commit()
+
+        face_det_exists = conn.execute(text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'face_detections'
+            )
+        """)).scalar()
+
+        if not face_det_exists:
+            logger.info("Creating face_detections table")
+            conn.execute(text(f"""
+                CREATE TABLE face_detections (
+                    id BIGSERIAL PRIMARY KEY,
+                    video_id UUID NOT NULL,
+                    frame_num INTEGER NOT NULL,
+                    timestamp_ms INTEGER NOT NULL,
+                    bbox_x1 INTEGER NOT NULL,
+                    bbox_y1 INTEGER NOT NULL,
+                    bbox_x2 INTEGER NOT NULL,
+                    bbox_y2 INTEGER NOT NULL,
+                    detection_score REAL NOT NULL,
+                    embedding vector({settings.FACE_EMBEDDING_DIM}),
+                    cluster_id INTEGER,
+                    thumbnail_path VARCHAR(500),
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_face_detections_video_id "
+                "ON face_detections (video_id)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_face_detections_cluster_id "
+                "ON face_detections (cluster_id)"
+            ))
+            conn.commit()
+
+        face_cluster_exists = conn.execute(text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'face_clusters'
+            )
+        """)).scalar()
+
+        if not face_cluster_exists:
+            logger.info("Creating face_clusters table")
+            conn.execute(text(f"""
+                CREATE TABLE face_clusters (
+                    id SERIAL PRIMARY KEY,
+                    representative_face_id BIGINT,
+                    label VARCHAR(200),
+                    face_count INTEGER NOT NULL DEFAULT 0,
+                    video_count INTEGER NOT NULL DEFAULT 0,
+                    centroid vector({settings.FACE_EMBEDDING_DIM}),
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+            conn.commit()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -476,10 +551,12 @@ async def indexing_status_for_video(
         "transcript_indexed": job.transcript_indexed,
         "caption_indexed": job.caption_indexed,
         "clip_indexed": job.clip_indexed,
+        "face_indexed": job.face_indexed,
         "frame_count": job.frame_count,
         "segment_count": job.segment_count,
         "caption_count": job.caption_count,
         "clip_count": job.clip_count,
+        "face_count": job.face_count,
         "error_message": job.error_message,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
@@ -516,6 +593,7 @@ async def reindex_video(
     ).delete()
     db.query(ClipEmbedding).filter(ClipEmbedding.video_id == video_uuid).delete()
     db.query(ActionEmbedding).filter(ActionEmbedding.video_id == video_uuid).delete()
+    db.query(FaceDetection).filter(FaceDetection.video_id == video_uuid).delete()
 
     # Reset job to pending
     job.status = "pending"
@@ -523,10 +601,12 @@ async def reindex_video(
     job.transcript_indexed = False
     job.caption_indexed = False
     job.clip_indexed = False
+    job.face_indexed = False
     job.frame_count = None
     job.segment_count = None
     job.caption_count = None
     job.clip_count = None
+    job.face_count = None
     job.error_message = None
     job.completed_at = None
     db.commit()
@@ -547,6 +627,8 @@ async def reindex_all(
     db.query(CaptionEmbedding).delete()
     db.query(ClipEmbedding).delete()
     db.query(ActionEmbedding).delete()
+    db.query(FaceDetection).delete()
+    db.query(FaceCluster).delete()
 
     # Create index jobs for any videos in the videos table that have no index status entry
     missing = db.execute(
@@ -570,10 +652,12 @@ async def reindex_all(
         job.transcript_indexed = False
         job.caption_indexed = False
         job.clip_indexed = False
+        job.face_indexed = False
         job.frame_count = None
         job.segment_count = None
         job.caption_count = None
         job.clip_count = None
+        job.face_count = None
         job.error_message = None
         job.completed_at = None
     db.commit()
@@ -785,6 +869,216 @@ app.include_router(search_router)
 # --- Health check ---
 
 
+# --- Face clustering endpoints ---
+
+
+@app.get("/faces/enabled")
+async def face_clustering_enabled():
+    """Check if face clustering is enabled."""
+    return {"enabled": settings.FACE_CLUSTERING_ENABLED}
+
+
+@app.get("/faces/clusters")
+async def list_face_clusters(
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """List all face clusters (person groups) with representative face info."""
+    clusters = (
+        db.query(FaceCluster)
+        .order_by(FaceCluster.video_count.desc(), FaceCluster.face_count.desc())
+        .all()
+    )
+    result = []
+    for c in clusters:
+        rep_face = None
+        if c.representative_face_id:
+            rep = db.query(FaceDetection).filter(
+                FaceDetection.id == c.representative_face_id
+            ).first()
+            if rep:
+                rep_face = {
+                    "video_id": str(rep.video_id),
+                    "timestamp_ms": rep.timestamp_ms,
+                    "thumbnail_url": f"/faces/thumbnail/{rep.video_id}/{rep.thumbnail_path}" if rep.thumbnail_path else None,
+                }
+        result.append({
+            "cluster_id": c.id,
+            "label": c.label,
+            "face_count": c.face_count,
+            "video_count": c.video_count,
+            "representative_face": rep_face,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        })
+    return {"clusters": result, "total": len(result)}
+
+
+@app.get("/faces/cluster/{cluster_id}")
+async def get_face_cluster_detail(
+    cluster_id: int,
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Get all face detections in a cluster, grouped by video.
+
+    Returns videos sorted by earliest appearance, with all face timestamps per video.
+    """
+    from sqlalchemy import func as sqla_func
+
+    cluster = db.query(FaceCluster).filter(FaceCluster.id == cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    # Get all faces in this cluster, ordered by timestamp
+    faces = (
+        db.query(FaceDetection)
+        .filter(FaceDetection.cluster_id == cluster_id)
+        .order_by(FaceDetection.timestamp_ms)
+        .all()
+    )
+
+    # Group by video
+    video_groups = {}
+    for face in faces:
+        vid = str(face.video_id)
+        if vid not in video_groups:
+            video_groups[vid] = {
+                "video_id": vid,
+                "first_timestamp_ms": face.timestamp_ms,
+                "faces": [],
+            }
+        video_groups[vid]["faces"].append({
+            "face_id": face.id,
+            "timestamp_ms": face.timestamp_ms,
+            "frame_num": face.frame_num,
+            "detection_score": face.detection_score,
+            "thumbnail_url": f"/faces/thumbnail/{face.video_id}/{face.thumbnail_path}" if face.thumbnail_path else None,
+            "bbox": [face.bbox_x1, face.bbox_y1, face.bbox_x2, face.bbox_y2],
+        })
+
+    # Sort video groups by first timestamp
+    videos = sorted(video_groups.values(), key=lambda v: v["first_timestamp_ms"])
+
+    return {
+        "cluster_id": cluster_id,
+        "label": cluster.label,
+        "face_count": cluster.face_count,
+        "video_count": cluster.video_count,
+        "videos": videos,
+    }
+
+
+@app.put("/faces/cluster/{cluster_id}/label")
+async def update_cluster_label(
+    cluster_id: int,
+    payload: dict,
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Set a user-friendly label for a face cluster."""
+    cluster = db.query(FaceCluster).filter(FaceCluster.id == cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+    cluster.label = payload.get("label", "").strip() or None
+    db.commit()
+    return {"status": "updated", "cluster_id": cluster_id, "label": cluster.label}
+
+
+@app.post("/faces/reprocess-all")
+async def reprocess_faces_all(
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Delete all face detections and clusters, re-queue face processing for all videos.
+
+    Only resets face data — leaves visual/transcript/caption/clip embeddings intact.
+    """
+    db.query(FaceDetection).delete()
+    db.query(FaceCluster).delete()
+
+    jobs = db.query(VideoIndexStatus).all()
+    queued = 0
+    for job in jobs:
+        if job.status in ("pending", "processing"):
+            continue
+        job.face_indexed = False
+        job.face_count = None
+        if job.status == "completed":
+            job.status = "pending_fix"
+        job.error_message = None
+        queued += 1
+
+    db.commit()
+    return {"status": "face_reprocess_queued", "queued": queued}
+
+
+@app.post("/faces/recluster")
+async def recluster_faces(
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Run full HDBSCAN re-clustering over all face embeddings (admin).
+
+    This is a potentially slow operation for large datasets.
+    """
+    import asyncio
+    from indexing.face_clustering import run_full_clustering
+
+    num_clusters, num_noise = await asyncio.to_thread(run_full_clustering, db)
+    return {
+        "status": "recluster_complete",
+        "num_clusters": num_clusters,
+        "num_noise": num_noise,
+    }
+
+
+@app.get("/faces/thumbnail/{video_id}/{filename}")
+async def get_face_thumbnail(video_id: str, filename: str):
+    """Serve a cropped face thumbnail image."""
+    import os
+
+    # Sanitize filename to prevent path traversal
+    safe_name = os.path.basename(filename)
+    thumb_path = os.path.join(settings.FACE_THUMBNAIL_DIR, video_id, safe_name)
+    if os.path.exists(thumb_path):
+        return FileResponse(thumb_path, media_type="image/jpeg")
+    raise HTTPException(status_code=404, detail="Face thumbnail not found")
+
+
+@app.get("/faces/stats")
+async def face_stats(
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Summary statistics for face clustering."""
+    from sqlalchemy import func as sqla_func
+
+    total_faces = db.query(sqla_func.count(FaceDetection.id)).scalar() or 0
+    total_clusters = db.query(sqla_func.count(FaceCluster.id)).scalar() or 0
+    assigned_faces = (
+        db.query(sqla_func.count(FaceDetection.id))
+        .filter(FaceDetection.cluster_id.isnot(None))
+        .scalar() or 0
+    )
+    unassigned_faces = total_faces - assigned_faces
+    videos_with_faces = (
+        db.query(sqla_func.count(sqla_func.distinct(FaceDetection.video_id)))
+        .scalar() or 0
+    )
+
+    return {
+        "enabled": settings.FACE_CLUSTERING_ENABLED,
+        "total_faces": total_faces,
+        "total_clusters": total_clusters,
+        "assigned_faces": assigned_faces,
+        "unassigned_faces": unassigned_faces,
+        "videos_with_faces": videos_with_faces,
+    }
+
+
+# --- Health check ---
+
+
 @app.get("/health")
 async def health():
     return {
@@ -799,4 +1093,6 @@ async def health():
         "clip_window_frames": settings.CLIP_WINDOW_FRAMES,
         "clip_window_stride": settings.CLIP_WINDOW_STRIDE,
         "clip_fps": settings.CLIP_FPS,
+        "face_clustering_enabled": settings.FACE_CLUSTERING_ENABLED,
+        "face_model_name": settings.FACE_MODEL_NAME,
     }

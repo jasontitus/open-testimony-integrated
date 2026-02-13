@@ -90,6 +90,24 @@ class Settings:
     TEMP_DIR: str = os.environ.get("TEMP_DIR", "/data/temp")
     THUMBNAIL_DIR: str = os.environ.get("THUMBNAIL_DIR", "/data/thumbnails")
 
+    # Face clustering (InsightFace buffalo_l + HDBSCAN)
+    FACE_CLUSTERING_ENABLED: bool = os.environ.get("FACE_CLUSTERING_ENABLED", "false").lower() == "true"
+    # InsightFace model pack: "buffalo_l" (ArcFace ResNet-100, 320MB, best accuracy)
+    # or "buffalo_sc" (MobileFaceNet, 12MB, faster but less accurate)
+    FACE_MODEL_NAME: str = os.environ.get("FACE_MODEL_NAME", "buffalo_l")
+    # Face embedding dimension (512 for both buffalo_l and buffalo_sc)
+    FACE_EMBEDDING_DIM: int = int(os.environ.get("FACE_EMBEDDING_DIM", "512"))
+    # Detection confidence threshold (lower = more faces detected, more false positives)
+    FACE_DETECTION_THRESHOLD: float = float(os.environ.get("FACE_DETECTION_THRESHOLD", "0.5"))
+    # Minimum face size in pixels (width or height) — skip tiny faces
+    FACE_MIN_SIZE: int = int(os.environ.get("FACE_MIN_SIZE", "30"))
+    # HDBSCAN min_cluster_size: minimum faces to form a person cluster
+    FACE_CLUSTER_MIN_SIZE: int = int(os.environ.get("FACE_CLUSTER_MIN_SIZE", "3"))
+    # Cosine distance threshold for incremental assignment to existing clusters
+    FACE_SIMILARITY_THRESHOLD: float = float(os.environ.get("FACE_SIMILARITY_THRESHOLD", "0.4"))
+    # Directory for cropped face thumbnails
+    FACE_THUMBNAIL_DIR: str = os.environ.get("FACE_THUMBNAIL_DIR", "/data/face_thumbnails")
+
     # Worker
     WORKER_POLL_INTERVAL: int = int(os.environ.get("WORKER_POLL_INTERVAL", "10"))
 
