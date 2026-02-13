@@ -45,14 +45,18 @@ class TestBridgeWebhookNotification:
         assert "video_id" in webhook_body
         assert "object_name" in webhook_body
 
-    def test_upload_photo_skips_bridge(self, client, registered_device, mock_minio):
-        """Photo uploads do not trigger the bridge webhook (videos only)."""
+    def test_upload_photo_notifies_bridge(self, client, registered_device, mock_minio):
+        """Photo uploads also trigger the bridge webhook for indexing."""
         video_bytes = b"fake-photo-content"
         metadata, _ = make_upload_payload(video_bytes, registered_device)
         metadata["payload"]["media_type"] = "photo"
 
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+
         with patch("main.httpx.AsyncClient") as MockClient:
             mock_client_instance = AsyncMock()
+            mock_client_instance.post = AsyncMock(return_value=mock_response)
             mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
             mock_client_instance.__aexit__ = AsyncMock(return_value=None)
             MockClient.return_value = mock_client_instance
@@ -64,8 +68,12 @@ class TestBridgeWebhookNotification:
             )
 
         assert resp.status_code == 200
-        # Bridge should NOT have been called for photos
-        mock_client_instance.post.assert_not_called()
+        # Bridge SHOULD have been called for photos (they now get indexed)
+        mock_client_instance.post.assert_called_once()
+        call_args = mock_client_instance.post.call_args
+        assert "/hooks/video-uploaded" in call_args[0][0]
+        webhook_body = call_args.kwargs.get("json") or call_args[1].get("json")
+        assert "photos/" in webhook_body["object_name"]
 
     def test_bridge_failure_is_nonfatal(self, client, registered_device, mock_minio):
         """Upload succeeds even when bridge notification fails."""

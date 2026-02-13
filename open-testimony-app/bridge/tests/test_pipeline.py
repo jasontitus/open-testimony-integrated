@@ -1,11 +1,13 @@
 """Tests for the indexing pipeline logic."""
 import os
 import sys
+import tempfile
 import uuid
 from unittest.mock import patch, MagicMock
 
 import numpy as np
 import pytest
+from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -191,3 +193,269 @@ class TestFullPipeline:
         )
         assert job.status == "failed"
         assert "MinIO unreachable" in job.error_message
+
+
+class TestIsPhoto:
+    """Tests for is_photo() media type detection."""
+
+    def test_photos_prefix_detected(self):
+        """Objects under photos/ are detected as photos."""
+        from indexing.pipeline import is_photo
+
+        assert is_photo("photos/device-1/20260213_120000_img.jpg") is True
+        assert is_photo("photos/bulk/20260213_120000_img.png") is True
+
+    def test_videos_prefix_not_photo(self):
+        """Objects under videos/ are not detected as photos."""
+        from indexing.pipeline import is_photo
+
+        assert is_photo("videos/device-1/20260213_120000_clip.mp4") is False
+        assert is_photo("videos/bulk/20260213_120000_clip.mov") is False
+
+    def test_photo_extensions_detected(self):
+        """Common photo extensions are detected regardless of path prefix."""
+        from indexing.pipeline import is_photo
+
+        for ext in [".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".tiff", ".bmp", ".gif"]:
+            assert is_photo(f"other/path/image{ext}") is True, f"Failed for {ext}"
+
+    def test_video_extensions_not_photo(self):
+        """Video extensions under non-photos/ paths are not detected as photos."""
+        from indexing.pipeline import is_photo
+
+        for ext in [".mp4", ".mov", ".avi", ".mkv"]:
+            assert is_photo(f"other/path/clip{ext}") is False, f"Failed for {ext}"
+
+    def test_case_insensitive_extensions(self):
+        """Extension matching is case-insensitive."""
+        from indexing.pipeline import is_photo
+
+        assert is_photo("other/IMG_001.JPG") is True
+        assert is_photo("other/IMG_001.Jpeg") is True
+
+
+class TestPhotoFrameExtraction:
+    """Tests for extract_photo_frame()."""
+
+    def test_extracts_single_frame(self):
+        """extract_photo_frame returns exactly one frame tuple."""
+        from indexing.pipeline import extract_photo_frame
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            Image.new("RGB", (100, 80), color="blue").save(f, "JPEG")
+            f.flush()
+            tmp_path = f.name
+
+        try:
+            frames = extract_photo_frame(tmp_path)
+            assert len(frames) == 1
+        finally:
+            os.unlink(tmp_path)
+
+    def test_frame_format_matches_video(self):
+        """Returned tuple has (frame_num=0, timestamp_ms=0, pil_image) format."""
+        from indexing.pipeline import extract_photo_frame
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            Image.new("RGB", (64, 48), color="green").save(f, "PNG")
+            f.flush()
+            tmp_path = f.name
+
+        try:
+            frames = extract_photo_frame(tmp_path)
+            frame_num, timestamp_ms, pil_img = frames[0]
+
+            assert frame_num == 0
+            assert timestamp_ms == 0
+            assert isinstance(pil_img, Image.Image)
+            assert pil_img.mode == "RGB"
+        finally:
+            os.unlink(tmp_path)
+
+    def test_creates_thumbnail(self):
+        """Thumbnail is saved when video_id_for_thumbs is provided."""
+        from indexing.pipeline import extract_photo_frame
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            Image.new("RGB", (640, 480), color="red").save(f, "JPEG")
+            f.flush()
+            tmp_path = f.name
+
+        thumb_dir = tempfile.mkdtemp()
+        fake_id = "test-photo-thumb-id"
+
+        try:
+            with patch("indexing.pipeline.settings") as mock_settings:
+                mock_settings.THUMBNAIL_DIR = thumb_dir
+                frames = extract_photo_frame(tmp_path, video_id_for_thumbs=fake_id)
+
+            assert len(frames) == 1
+            expected_thumb = os.path.join(thumb_dir, fake_id, "0.jpg")
+            assert os.path.exists(expected_thumb)
+
+            # Verify thumbnail is a valid JPEG
+            thumb_img = Image.open(expected_thumb)
+            assert thumb_img.width == 320
+        finally:
+            os.unlink(tmp_path)
+            import shutil
+            shutil.rmtree(thumb_dir, ignore_errors=True)
+
+    def test_dark_photo_still_indexed(self):
+        """Very dark photos are logged as warning but still returned."""
+        from indexing.pipeline import extract_photo_frame
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            # Create a nearly-black image (mean brightness < 15)
+            Image.new("RGB", (64, 64), color=(5, 5, 5)).save(f, "PNG")
+            f.flush()
+            tmp_path = f.name
+
+        try:
+            frames = extract_photo_frame(tmp_path)
+            assert len(frames) == 1
+        finally:
+            os.unlink(tmp_path)
+
+
+class TestPhotoIndexingPipeline:
+    """Integration tests for photo indexing through fix_video_indexes()."""
+
+    def test_photo_skips_transcript_and_clips(self, db_session):
+        """Photos mark transcript/clips as indexed without running those stages."""
+        from indexing.pipeline import fix_video_indexes
+        from models import VideoIndexStatus, FrameEmbedding, TranscriptEmbedding, ClipEmbedding
+        from tests.conftest import insert_video_stub
+
+        vid = insert_video_stub(db_session)
+        video_uuid = uuid.UUID(vid)
+
+        db_session.add(VideoIndexStatus(
+            video_id=video_uuid,
+            object_name="photos/device-1/20260213_photo.jpg",
+            status="pending",
+        ))
+        db_session.commit()
+
+        # Create a real temp photo for extract_photo_frame
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            Image.new("RGB", (64, 64), color="blue").save(f, "JPEG")
+            tmp_path = f.name
+
+        try:
+            with patch("indexing.pipeline.download_video", return_value=tmp_path), \
+                 patch("indexing.pipeline._store_frame_embeddings", return_value=1) as mock_visual, \
+                 patch("indexing.pipeline._store_caption_embeddings", return_value=1) as mock_captions, \
+                 patch("indexing.pipeline._store_transcript_embeddings") as mock_transcript, \
+                 patch("indexing.pipeline._store_clip_embeddings") as mock_clips, \
+                 patch("indexing.pipeline._store_face_detections", return_value=0) as mock_faces, \
+                 patch("indexing.pipeline.settings") as mock_settings:
+                mock_settings.CAPTION_ENABLED = True
+                mock_settings.CLIP_ENABLED = True
+                mock_settings.FACE_CLUSTERING_ENABLED = True
+                mock_settings.DEVICE = "cpu"
+                mock_settings.FRAME_INTERVAL_SEC = 2.0
+                mock_settings.THUMBNAIL_DIR = tempfile.mkdtemp()
+
+                fix_video_indexes(video_uuid, "photos/device-1/20260213_photo.jpg", db_session)
+
+            db_session.expire_all()
+            job = db_session.query(VideoIndexStatus).filter(
+                VideoIndexStatus.video_id == video_uuid
+            ).first()
+
+            assert job.status == "completed"
+            assert job.transcript_indexed is True
+            assert job.clip_indexed is True
+
+            # Transcript and clips should NOT have been called
+            mock_transcript.assert_not_called()
+            mock_clips.assert_not_called()
+
+            # Visual, captions, and faces SHOULD have been called
+            mock_visual.assert_called_once()
+            mock_captions.assert_called_once()
+            mock_faces.assert_called_once()
+        finally:
+            os.unlink(tmp_path)
+
+    def test_photo_uses_extract_photo_frame(self, db_session):
+        """Photo indexing uses extract_photo_frame instead of extract_frames."""
+        from indexing.pipeline import fix_video_indexes
+        from models import VideoIndexStatus
+        from tests.conftest import insert_video_stub
+
+        vid = insert_video_stub(db_session)
+        video_uuid = uuid.UUID(vid)
+
+        db_session.add(VideoIndexStatus(
+            video_id=video_uuid,
+            object_name="photos/bulk/20260213_pic.png",
+            status="pending",
+        ))
+        db_session.commit()
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            Image.new("RGB", (64, 64), color="green").save(f, "PNG")
+            tmp_path = f.name
+
+        try:
+            with patch("indexing.pipeline.download_video", return_value=tmp_path), \
+                 patch("indexing.pipeline.extract_photo_frame", return_value=[(0, 0, Image.new("RGB", (64, 64)))]) as mock_photo, \
+                 patch("indexing.pipeline.extract_frames") as mock_video_frames, \
+                 patch("indexing.pipeline._store_frame_embeddings", return_value=1), \
+                 patch("indexing.pipeline._store_caption_embeddings", return_value=0), \
+                 patch("indexing.pipeline._store_face_detections", return_value=0), \
+                 patch("indexing.pipeline.settings") as mock_settings:
+                mock_settings.CAPTION_ENABLED = True
+                mock_settings.CLIP_ENABLED = True
+                mock_settings.FACE_CLUSTERING_ENABLED = True
+                mock_settings.DEVICE = "cpu"
+
+                fix_video_indexes(video_uuid, "photos/bulk/20260213_pic.png", db_session)
+
+            # extract_photo_frame should have been called, not extract_frames
+            mock_photo.assert_called_once()
+            mock_video_frames.assert_not_called()
+        finally:
+            os.unlink(tmp_path)
+
+    def test_video_still_uses_extract_frames(self, db_session):
+        """Video indexing still uses extract_frames (not extract_photo_frame)."""
+        from indexing.pipeline import fix_video_indexes
+        from models import VideoIndexStatus
+        from tests.conftest import insert_video_stub
+
+        vid = insert_video_stub(db_session)
+        video_uuid = uuid.UUID(vid)
+
+        db_session.add(VideoIndexStatus(
+            video_id=video_uuid,
+            object_name="videos/device-1/20260213_clip.mp4",
+            status="pending",
+        ))
+        db_session.commit()
+
+        bright_frame = Image.new("RGB", (64, 64), color="white")
+
+        with patch("indexing.pipeline.download_video", return_value="/fake/video.mp4"), \
+             patch("indexing.pipeline.extract_photo_frame") as mock_photo, \
+             patch("indexing.pipeline.extract_frames", return_value=[(0, 0, bright_frame)]) as mock_video_frames, \
+             patch("indexing.pipeline._store_frame_embeddings", return_value=1), \
+             patch("indexing.pipeline._store_caption_embeddings", return_value=0), \
+             patch("indexing.pipeline._store_transcript_embeddings", return_value=0), \
+             patch("indexing.pipeline._store_clip_embeddings", return_value=0), \
+             patch("indexing.pipeline._store_face_detections", return_value=0), \
+             patch("indexing.pipeline.settings") as mock_settings, \
+             patch("os.path.exists", return_value=False):
+            mock_settings.CAPTION_ENABLED = True
+            mock_settings.CLIP_ENABLED = True
+            mock_settings.FACE_CLUSTERING_ENABLED = True
+            mock_settings.DEVICE = "cpu"
+            mock_settings.FRAME_INTERVAL_SEC = 2.0
+
+            fix_video_indexes(video_uuid, "videos/device-1/20260213_clip.mp4", db_session)
+
+        # extract_frames should have been called, not extract_photo_frame
+        mock_video_frames.assert_called_once()
+        mock_photo.assert_not_called()
