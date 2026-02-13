@@ -672,10 +672,12 @@ function IndexingManagement() {
     }
   };
 
+  // Combine pending + pending_fix + pending_visual into one "Pending" count for display
+  const pendingCount = (stats?.pending ?? 0) + (stats?.pending_visual ?? 0) + (stats?.pending_fix ?? 0);
   const statusItems = stats ? [
     { label: 'Completed', value: stats.completed ?? 0, color: 'text-green-400' },
     { label: 'Processing', value: stats.processing ?? 0, color: 'text-yellow-400' },
-    { label: 'Pending', value: stats.pending ?? 0, color: 'text-blue-400' },
+    { label: 'Pending', value: pendingCount, color: 'text-blue-400' },
     { label: 'Failed', value: stats.failed ?? 0, color: 'text-red-400' },
   ] : [];
 
@@ -771,7 +773,28 @@ function IndexingManagement() {
           </div>
           {faceStats?.enabled && (
             <div className="mt-4 pt-4 border-t border-gray-700">
-              <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-3">Face Clustering</p>
+              <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-3">Face Detection &amp; Clustering</p>
+
+              {/* Face processing progress bar */}
+              {faceStats.face_pending > 0 && (
+                <div className="mb-4 p-3 bg-orange-900/20 border border-orange-500/30 rounded-lg">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs text-orange-300 font-medium">
+                      Processing faces: {faceStats.face_done} of {faceStats.total_videos} videos done
+                    </span>
+                    <span className="text-xs text-orange-400 font-mono">
+                      {faceStats.face_pending} remaining
+                    </span>
+                  </div>
+                  <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-orange-500 rounded-full transition-all duration-500"
+                      style={{ width: `${faceStats.total_videos > 0 ? (faceStats.face_done / faceStats.total_videos) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-4 gap-4">
                 <div className="text-center">
                   <div className="text-2xl font-bold text-orange-400">{faceStats.total_clusters}</div>
@@ -779,15 +802,15 @@ function IndexingManagement() {
                 </div>
                 <div className="text-center">
                   <div className="text-2xl font-bold text-teal-400">{faceStats.total_faces}</div>
-                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Faces</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Faces Detected</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-blue-400">{faceStats.assigned_faces}</div>
-                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Assigned</div>
+                  <div className="text-2xl font-bold text-green-400">{faceStats.face_done}</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Videos Done</div>
                 </div>
                 <div className="text-center">
                   <div className="text-2xl font-bold text-gray-400">{faceStats.unassigned_faces}</div>
-                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Unassigned</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Unclustered</div>
                 </div>
               </div>
             </div>

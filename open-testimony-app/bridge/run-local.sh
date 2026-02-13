@@ -69,6 +69,13 @@ export CAPTION_MAX_TOKENS="256"
 export CAPTION_BATCH_SIZE="1"
 export CLIP_ACTION_CAPTIONING="false"
 
+# Face clustering (InsightFace buffalo_l + HDBSCAN)
+export FACE_CLUSTERING_ENABLED="true"
+export FACE_MODEL_NAME="buffalo_l"
+export FACE_DETECTION_THRESHOLD="0.5"
+export FACE_CLUSTER_MIN_SIZE="3"
+export FACE_SIMILARITY_THRESHOLD="0.4"
+
 # MPS GPU acceleration on Apple Silicon
 export DEVICE="mps"
 export USE_FP16="false"
@@ -79,6 +86,7 @@ export BATCH_SIZE="16"
 export WORKER_POLL_INTERVAL="10"
 export TEMP_DIR="$DATA_DIR/temp"
 export THUMBNAIL_DIR="$DATA_DIR/thumbnails"
+export FACE_THUMBNAIL_DIR="$DATA_DIR/face_thumbnails"
 export OT_API_URL="http://localhost:18080/api"
 
 echo ""

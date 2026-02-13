@@ -1066,6 +1066,20 @@ async def face_stats(
         .scalar() or 0
     )
 
+    # Face processing progress: how many videos still need face detection?
+    total_videos = db.query(sqla_func.count(VideoIndexStatus.video_id)).scalar() or 0
+    face_done = (
+        db.query(sqla_func.count(VideoIndexStatus.video_id))
+        .filter(VideoIndexStatus.face_indexed == True)
+        .scalar() or 0
+    )
+    face_pending = (
+        db.query(sqla_func.count(VideoIndexStatus.video_id))
+        .filter(VideoIndexStatus.face_indexed == False)
+        .filter(VideoIndexStatus.status.in_(("pending_fix", "processing")))
+        .scalar() or 0
+    )
+
     return {
         "enabled": settings.FACE_CLUSTERING_ENABLED,
         "total_faces": total_faces,
@@ -1073,6 +1087,9 @@ async def face_stats(
         "assigned_faces": assigned_faces,
         "unassigned_faces": unassigned_faces,
         "videos_with_faces": videos_with_faces,
+        "total_videos": total_videos,
+        "face_done": face_done,
+        "face_pending": face_pending,
     }
 
 

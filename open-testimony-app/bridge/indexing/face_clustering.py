@@ -77,12 +77,12 @@ def detect_and_embed_faces(
             if face.det_score < settings.FACE_DETECTION_THRESHOLD:
                 continue
 
-            # Get bounding box
+            # Get bounding box (cast to Python int — numpy.int64 breaks psycopg2)
             bbox = face.bbox.astype(int)
-            x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
+            x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
 
             # Clamp to image bounds
-            h, w = img_rgb.shape[:2]
+            h, w = int(img_rgb.shape[0]), int(img_rgb.shape[1])
             x1 = max(0, x1)
             y1 = max(0, y1)
             x2 = min(w, x2)

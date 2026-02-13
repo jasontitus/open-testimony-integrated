@@ -622,12 +622,21 @@ def fix_video_indexes(video_id: str, object_name: str, db: Session):
             job.clip_count = has_clips
 
         # Stage 5: Face detection + embedding + incremental clustering
+        # Face failures are non-fatal — don't tank the whole job
         if need_faces:
-            face_count_stored = _store_face_detections(video_id, all_frames, db)
-            job.face_indexed = True
-            job.face_count = face_count_stored
-            db.commit()
-            logger.info(f"[fix] Faces: stored {face_count_stored} face detections")
+            try:
+                face_count_stored = _store_face_detections(video_id, all_frames, db)
+                job.face_indexed = True
+                job.face_count = face_count_stored
+                db.commit()
+                logger.info(f"[fix] Faces: stored {face_count_stored} face detections")
+            except Exception as face_err:
+                logger.warning(f"[fix] Face detection failed for {video_id} (non-fatal): {face_err}")
+                db.rollback()
+                # Re-fetch job after rollback
+                job = db.query(VideoIndexStatus).filter(
+                    VideoIndexStatus.video_id == video_id
+                ).first()
         elif settings.FACE_CLUSTERING_ENABLED:
             job.face_indexed = True
             job.face_count = has_faces
