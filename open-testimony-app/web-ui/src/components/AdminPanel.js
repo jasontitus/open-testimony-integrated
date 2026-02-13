@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
-import { UserPlus, Key, Shield, AlertCircle, Tag, Trash2, RefreshCw, Database, Upload, CheckCircle, XCircle, FileVideo, Image, Plus, ScrollText, Download, ChevronDown, ChevronRight, Filter } from 'lucide-react';
+import { UserPlus, Key, Shield, AlertCircle, Tag, Trash2, RefreshCw, Database, Upload, CheckCircle, XCircle, FileVideo, Image, Plus, ScrollText, Download, ChevronDown, ChevronRight, Filter, Search, TrendingUp, Clock } from 'lucide-react';
 import axios from 'axios';
 import api from '../api';
 
@@ -80,6 +80,9 @@ export default function AdminPanel() {
 
         {/* Indexing Management */}
         <IndexingManagement />
+
+        {/* Top Searches */}
+        <TopSearches />
 
         {/* Audit Log */}
         <AuditLogViewer />
@@ -718,6 +721,137 @@ function IndexingManagement() {
       ) : (
         <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 text-center text-gray-500">
           Could not load indexing status
+        </div>
+      )}
+    </div>
+  );
+}
+
+const MODE_LABELS = {
+  visual: 'Visual',
+  transcript: 'Transcript',
+  transcript_exact: 'Transcript (exact)',
+  caption: 'Caption',
+  caption_exact: 'Caption (exact)',
+  combined: 'Combined',
+  clips: 'Clips',
+  actions: 'Actions',
+  actions_exact: 'Actions (exact)',
+};
+
+function TopSearches() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState(30);
+
+  const fetchTopSearches = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await aiApi.get('/search/top-queries', { params: { days, limit: 50 } });
+      setData(res.data);
+    } catch (err) {
+      console.error('Failed to load top searches:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [days]);
+
+  useEffect(() => { fetchTopSearches(); }, [fetchTopSearches]);
+
+  const maxCount = data?.queries?.[0]?.count || 1;
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <TrendingUp size={20} className="text-amber-400" />
+          <h2 className="text-xl font-bold text-white">Top Searches</h2>
+          {data && (
+            <span className="text-xs text-gray-500 ml-2">
+              {data.total_searches} total searches
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">Period:</span>
+          {[7, 30, 90].map(d => (
+            <button
+              key={d}
+              onClick={() => setDays(d)}
+              className={`px-2.5 py-1 text-xs rounded-lg transition ${
+                days === d
+                  ? 'bg-amber-600 text-white font-medium'
+                  : 'bg-gray-800 text-gray-400 hover:text-white border border-gray-700'
+              }`}
+            >
+              {d}d
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-500"></div>
+        </div>
+      ) : !data || data.queries.length === 0 ? (
+        <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 text-center text-gray-500">
+          No searches recorded in the last {days} days
+        </div>
+      ) : (
+        <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-gray-700">
+                <th className="text-left px-4 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider w-8">#</th>
+                <th className="text-left px-4 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Query</th>
+                <th className="text-left px-4 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Count</th>
+                <th className="text-left px-4 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Modes</th>
+                <th className="text-left px-4 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Avg Results</th>
+                <th className="text-left px-4 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Last Searched</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.queries.map((q, i) => (
+                <tr key={i} className="border-b border-gray-700/50 hover:bg-gray-750">
+                  <td className="px-4 py-2.5 text-xs text-gray-600">{i + 1}</td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <Search size={12} className="text-gray-600 flex-shrink-0" />
+                      <span className="text-sm text-gray-200">{q.query}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-mono text-amber-400">{q.count}</span>
+                      <div className="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-amber-500 rounded-full"
+                          style={{ width: `${(q.count / maxCount) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex flex-wrap gap-1">
+                      {q.modes.map(m => (
+                        <span key={m} className="px-1.5 py-0.5 bg-gray-700/50 border border-gray-600 rounded text-[10px] text-gray-400">
+                          {MODE_LABELS[m] || m}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5 text-xs text-gray-400">{q.avg_results}</td>
+                  <td className="px-4 py-2.5 text-xs text-gray-500">
+                    <div className="flex items-center gap-1">
+                      <Clock size={10} />
+                      {q.last_searched ? format(new Date(q.last_searched), 'MMM d, HH:mm') : '-'}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

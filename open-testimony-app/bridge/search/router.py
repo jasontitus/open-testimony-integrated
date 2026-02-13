@@ -5,6 +5,7 @@ import time
 
 import torch
 from fastapi import APIRouter, Depends, File, Query, UploadFile
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from auth import require_auth
@@ -542,4 +543,56 @@ async def combined_search(
             "total_ms": total_ms,
         },
         "results": results,
+    }
+
+
+@router.get("/top-queries")
+async def top_queries(
+    days: int = Query(30, ge=1, le=365, description="Look-back window in days"),
+    limit: int = Query(50, ge=1, le=200, description="Max queries to return"),
+    _user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Return the most frequently searched queries, aggregated from search_queries log."""
+    from datetime import datetime, timedelta, timezone
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    rows = (
+        db.query(
+            func.lower(func.trim(SearchQuery.query_text)).label("query"),
+            func.count().label("count"),
+            func.avg(SearchQuery.result_count).label("avg_results"),
+            func.avg(SearchQuery.duration_ms).label("avg_duration_ms"),
+            func.max(SearchQuery.created_at).label("last_searched"),
+            func.array_agg(func.distinct(SearchQuery.search_mode)).label("modes"),
+        )
+        .filter(SearchQuery.created_at >= cutoff)
+        .group_by(func.lower(func.trim(SearchQuery.query_text)))
+        .order_by(func.count().desc())
+        .limit(limit)
+        .all()
+    )
+
+    total_searches = (
+        db.query(func.count())
+        .select_from(SearchQuery)
+        .filter(SearchQuery.created_at >= cutoff)
+        .scalar()
+    )
+
+    return {
+        "days": days,
+        "total_searches": total_searches or 0,
+        "queries": [
+            {
+                "query": r.query,
+                "count": r.count,
+                "avg_results": round(float(r.avg_results), 1) if r.avg_results else 0,
+                "avg_duration_ms": round(float(r.avg_duration_ms)) if r.avg_duration_ms else 0,
+                "last_searched": r.last_searched.isoformat() if r.last_searched else None,
+                "modes": sorted(r.modes) if r.modes else [],
+            }
+            for r in rows
+        ],
     }
