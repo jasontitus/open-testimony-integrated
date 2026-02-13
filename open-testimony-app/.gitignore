@@ -28,6 +28,9 @@ data/
 access.jsonl
 **/logs/access.jsonl
 
+# Local bridge PID file
+.bridge.pid
+
 # Claude Code
 .claude/
 
