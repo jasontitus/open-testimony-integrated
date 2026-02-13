@@ -598,19 +598,18 @@ async def upload_video(
         logger.info(f"Video record created with ID: {video_record.id}")
 
         # Step 9: Notify bridge service for AI indexing (fire-and-forget)
-        if media_type == "video":
-            try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    await client.post(
-                        f"{os.environ.get('BRIDGE_URL', 'http://bridge:8003')}/hooks/video-uploaded",
-                        json={
-                            "video_id": str(video_record.id),
-                            "object_name": object_name,
-                        },
-                    )
-                logger.info(f"Bridge notified for video {video_record.id}")
-            except Exception as e:
-                logger.warning(f"Bridge notification failed (non-fatal): {e}")
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(
+                    f"{os.environ.get('BRIDGE_URL', 'http://bridge:8003')}/hooks/video-uploaded",
+                    json={
+                        "video_id": str(video_record.id),
+                        "object_name": object_name,
+                    },
+                )
+            logger.info(f"Bridge notified for {media_type} {video_record.id}")
+        except Exception as e:
+            logger.warning(f"Bridge notification failed (non-fatal): {e}")
 
         return {
             "status": "success",
