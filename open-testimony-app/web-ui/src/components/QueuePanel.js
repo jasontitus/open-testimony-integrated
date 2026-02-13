@@ -253,34 +253,24 @@ export default function QueuePanel() {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
       {/* Queue Header */}
-      <div className="shrink-0 bg-gray-800 border-b border-gray-700 px-4 py-2">
-        {/* Title row with inline progress */}
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-3">
-            <h2 className="text-sm font-bold text-gray-200 uppercase tracking-wider">Review Queue</h2>
-            <div className="flex items-center gap-2">
-              <div className="w-16 bg-gray-700 rounded-full h-1.5">
-                <div
-                  className="bg-green-500 h-1.5 rounded-full transition-all duration-500"
-                  style={{ width: `${progressPct}%` }}
-                />
-              </div>
-              <span className="text-[10px] text-gray-500">
-                {stats.reviewed + stats.flagged}/{stats.total}
-              </span>
+      <div className="shrink-0 bg-gray-800 border-b border-gray-700 px-2 md:px-4 py-1.5 md:py-2">
+        {/* Single row: title + progress + tabs + controls */}
+        <div className="flex items-center gap-1 md:gap-1.5 flex-wrap">
+          {/* Title + progress — compact on mobile */}
+          <h2 className="hidden md:block text-sm font-bold text-gray-200 uppercase tracking-wider mr-1">Review Queue</h2>
+          <div className="flex items-center gap-1.5 mr-1">
+            <div className="w-10 md:w-16 bg-gray-700 rounded-full h-1.5">
+              <div
+                className="bg-green-500 h-1.5 rounded-full transition-all duration-500"
+                style={{ width: `${progressPct}%` }}
+              />
             </div>
+            <span className="text-[10px] text-gray-500">
+              {stats.reviewed + stats.flagged}/{stats.total}
+            </span>
           </div>
-          <button
-            onClick={() => { fetchQueue(); fetchStats(); fetchTags(); }}
-            className="text-gray-500 hover:text-white transition p-1"
-            title="Refresh"
-          >
-            <RotateCcw size={14} />
-          </button>
-        </div>
 
-        {/* Status tabs (icon + count only) and sort/filter on same row */}
-        <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Status tabs */}
           {STATUS_TABS.map(tab => {
             const Icon = tab.icon;
             const count = stats[tab.value] || 0;
@@ -289,7 +279,7 @@ export default function QueuePanel() {
               <button
                 key={tab.value}
                 onClick={() => setStatusFilter(tab.value)}
-                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition border ${
+                className={`flex items-center gap-0.5 md:gap-1 px-1.5 md:px-2 py-1 rounded-lg text-xs font-medium transition border ${
                   active
                     ? tab.value === 'pending' ? 'bg-yellow-600/20 border-yellow-500/50 text-yellow-300'
                     : tab.value === 'flagged' ? 'bg-orange-600/20 border-orange-500/50 text-orange-300'
@@ -304,34 +294,33 @@ export default function QueuePanel() {
             );
           })}
 
-          <div className="w-px h-4 bg-gray-700" />
+          <div className="w-px h-4 bg-gray-700 hidden md:block" />
 
-          {/* Sort */}
-          <div className="flex items-center gap-1.5">
-            <ArrowUpDown size={12} className="text-gray-500" />
-            <select
-              value={sortOrder}
-              onChange={e => setSortOrder(e.target.value)}
-              className="bg-gray-900 border border-gray-700 rounded-lg text-xs text-gray-300 px-2 py-1.5 focus:outline-none focus:border-blue-500"
-            >
-              {SORT_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
+          {/* Sort — icon-only on mobile */}
+          <select
+            value={sortOrder}
+            onChange={e => setSortOrder(e.target.value)}
+            className="bg-gray-900 border border-gray-700 rounded-lg text-[10px] md:text-xs text-gray-300 px-1 md:px-2 py-1 focus:outline-none focus:border-blue-500 ml-auto md:ml-0"
+          >
+            {SORT_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
 
-          {/* Tag filter */}
+          {/* Tag filter — icon only on mobile */}
           <div className="relative">
             <button
               onClick={() => setShowTagFilter(!showTagFilter)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition border ${
+              className={`flex items-center gap-1 px-1.5 md:px-2.5 py-1 rounded-lg text-xs font-medium transition border ${
                 tagFilter
                   ? 'bg-blue-600/20 border-blue-500/50 text-blue-300'
                   : 'bg-gray-900 border-gray-700 text-gray-500 hover:text-gray-300 hover:border-gray-600'
               }`}
+              title={tagFilter ? `Tag: ${tagFilter}` : 'Filter by Tag'}
             >
               <Filter size={12} />
-              {tagFilter ? `Tag: ${tagFilter}` : 'Filter by Tag'}
+              <span className="hidden md:inline">{tagFilter ? `Tag: ${tagFilter}` : 'Filter'}</span>
+              {tagFilter && <span className="md:hidden text-[10px] max-w-[40px] truncate">{tagFilter}</span>}
             </button>
             {showTagFilter && (
               <TagFilterDropdown
@@ -348,11 +337,20 @@ export default function QueuePanel() {
           {tagFilter && (
             <button
               onClick={() => setTagFilter('')}
-              className="text-xs text-gray-500 hover:text-white transition"
+              className="text-[10px] text-gray-500 hover:text-white transition"
+              title="Clear filter"
             >
-              Clear filter
+              &times;
             </button>
           )}
+
+          <button
+            onClick={() => { fetchQueue(); fetchStats(); fetchTags(); }}
+            className="text-gray-500 hover:text-white transition p-0.5 md:p-1"
+            title="Refresh"
+          >
+            <RotateCcw size={12} />
+          </button>
         </div>
       </div>
 
@@ -362,8 +360,8 @@ export default function QueuePanel() {
         <div className={`w-full md:w-80 shrink-0 bg-gray-800 border-r border-gray-700 flex flex-col overflow-hidden ${
           mobileShowDetail ? 'hidden md:flex' : 'flex'
         }`}>
-          <div className="px-3 py-2 border-b border-gray-700 text-xs text-gray-500">
-            {total} item{total !== 1 ? 's' : ''} {statusFilter}
+          <div className="px-2 md:px-3 py-1 md:py-2 border-b border-gray-700 text-[10px] md:text-xs text-gray-500">
+            {total} {statusFilter}
           </div>
           <div className="flex-1 overflow-y-auto">
             {loading ? (
@@ -385,7 +383,7 @@ export default function QueuePanel() {
                     setCurrentIndex(idx);
                     setMobileShowDetail(true);
                   }}
-                  className={`w-full text-left p-3 border-b border-gray-700 transition hover:bg-gray-750 ${
+                  className={`w-full text-left p-2 md:p-3 border-b border-gray-700 transition hover:bg-gray-750 ${
                     idx === currentIndex ? 'bg-gray-700 border-l-4 border-l-blue-500' : ''
                   }`}
                 >
@@ -427,7 +425,7 @@ export default function QueuePanel() {
         </div>
 
         {/* Detail pane — hidden on mobile unless viewing detail */}
-        <div className={`flex-1 overflow-y-auto bg-gray-900 p-4 md:p-6 ${
+        <div className={`flex-1 overflow-y-auto bg-gray-900 p-2 md:p-6 ${
           mobileShowDetail ? 'flex flex-col' : 'hidden md:block'
         }`}>
           {!currentVideo ? (
@@ -440,37 +438,37 @@ export default function QueuePanel() {
           ) : (
             <div className="max-w-4xl mx-auto w-full">
               {/* Navigation bar */}
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between mb-1.5 md:mb-3">
+                <div className="flex items-center gap-1 md:gap-2">
                   {/* Back to list — mobile only */}
                   <button
                     onClick={() => setMobileShowDetail(false)}
-                    className="md:hidden p-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 transition"
+                    className="md:hidden p-1.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 transition"
                     title="Back to list"
                   >
-                    <ArrowLeft size={16} />
+                    <ArrowLeft size={14} />
                   </button>
                   <button
                     onClick={goPrev}
                     disabled={currentIndex === 0}
-                    className="p-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                    className="p-1.5 md:p-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition"
                     title="Previous (Left arrow or K)"
                   >
-                    <ChevronLeft size={16} />
+                    <ChevronLeft size={14} />
                   </button>
-                  <span className="text-sm text-gray-400">
-                    {currentIndex + 1} of {queue.length}
+                  <span className="text-xs md:text-sm text-gray-400">
+                    {currentIndex + 1}/{queue.length}
                   </span>
                   <button
                     onClick={goNext}
                     disabled={currentIndex >= queue.length - 1}
-                    className="p-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                    className="p-1.5 md:p-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition"
                     title="Next (Right arrow or J)"
                   >
-                    <ChevronRight size={16} />
+                    <ChevronRight size={14} />
                   </button>
-                  {/* Inline badges */}
-                  <div className="hidden md:flex items-center gap-1.5 ml-1">
+                  {/* Inline badges — desktop + mobile */}
+                  <div className="flex items-center gap-1 md:gap-1.5 ml-0.5 md:ml-1">
                     <VerificationBadge status={currentVideo.verification_status} />
                     <SourceBadge source={currentVideo.source} />
                     <MediaTypeBadge mediaType={currentVideo.media_type} />
@@ -483,50 +481,50 @@ export default function QueuePanel() {
                     <button
                       onClick={() => handleReview('pending')}
                       disabled={saving}
-                      className="flex items-center gap-1.5 px-2 md:px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-gray-300 text-sm rounded-lg transition"
+                      className="flex items-center gap-1 px-1.5 md:px-3 py-1.5 md:py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-gray-300 text-xs md:text-sm rounded-lg transition"
                     >
-                      <RotateCcw size={14} />
+                      <RotateCcw size={12} />
                       <span className="hidden md:inline">Reset</span>
                     </button>
                   )}
                   <button
                     onClick={() => handleReview('flagged')}
                     disabled={saving || currentVideo.review_status === 'flagged'}
-                    className={`flex items-center gap-1.5 px-2 md:px-3 py-2 text-sm rounded-lg transition ${
+                    className={`flex items-center gap-1 px-1.5 md:px-3 py-1.5 md:py-2 text-xs md:text-sm rounded-lg transition ${
                       currentVideo.review_status === 'flagged'
                         ? 'bg-orange-600/30 border border-orange-500/50 text-orange-300 cursor-default'
                         : 'bg-orange-600 hover:bg-orange-500 disabled:bg-orange-800 text-white'
                     }`}
                     title="Flag for follow-up (F)"
                   >
-                    <Flag size={14} />
+                    <Flag size={12} />
                     <span className="hidden md:inline">{currentVideo.review_status === 'flagged' ? 'Flagged' : 'Flag'}</span>
                   </button>
                   <button
                     onClick={() => handleReview('reviewed')}
                     disabled={saving || currentVideo.review_status === 'reviewed'}
-                    className={`flex items-center gap-1.5 px-2 md:px-3 py-2 text-sm rounded-lg transition ${
+                    className={`flex items-center gap-1 px-1.5 md:px-3 py-1.5 md:py-2 text-xs md:text-sm rounded-lg transition ${
                       currentVideo.review_status === 'reviewed'
                         ? 'bg-green-600/30 border border-green-500/50 text-green-300 cursor-default'
                         : 'bg-green-600 hover:bg-green-500 disabled:bg-green-800 text-white'
                     }`}
                     title="Mark as reviewed (R)"
                   >
-                    <CheckCircle size={14} />
+                    <CheckCircle size={12} />
                     <span className="hidden md:inline">{currentVideo.review_status === 'reviewed' ? 'Reviewed' : 'Mark Reviewed'}</span>
                   </button>
                 </div>
               </div>
 
               {saveError && (
-                <div className="mb-4 p-3 bg-red-900/30 border border-red-500/50 rounded-lg text-sm text-red-400 flex items-center gap-2">
-                  <AlertCircle size={14} />
+                <div className="mb-2 md:mb-4 p-2 md:p-3 bg-red-900/30 border border-red-500/50 rounded-lg text-xs md:text-sm text-red-400 flex items-center gap-2">
+                  <AlertCircle size={12} />
                   {saveError}
                 </div>
               )}
 
               {/* Media player */}
-              <div className="aspect-video bg-black rounded-xl overflow-hidden mb-3">
+              <div className="aspect-video bg-black rounded-lg md:rounded-xl overflow-hidden mb-2 md:mb-3">
                 {videoUrl ? (
                   detail?.media_type === 'photo' ? (
                     <img src={videoUrl} alt="Testimony" className="w-full h-full object-contain" />
@@ -540,16 +538,9 @@ export default function QueuePanel() {
                 )}
               </div>
 
-              {/* Badges — mobile only (on desktop these are in the nav bar) */}
-              <div className="flex md:hidden items-center gap-2 flex-wrap mb-3">
-                <VerificationBadge status={currentVideo.verification_status} />
-                <SourceBadge source={currentVideo.source} />
-                <MediaTypeBadge mediaType={currentVideo.media_type} />
-              </div>
-
               {/* Category & Tags */}
               {detail && (
-                <div className="mb-3">
+                <div className="mb-2 md:mb-3">
                   <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Category & Tags</label>
                   <QuickTagMenu
                     inline
@@ -564,7 +555,7 @@ export default function QueuePanel() {
               )}
 
               {/* Location */}
-              <div className="mb-3">
+              <div className="mb-2 md:mb-3">
                 <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Location Description</label>
                 {detail?.location && detail?.source === 'live' ? (
                   <div className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-400">
@@ -591,24 +582,24 @@ export default function QueuePanel() {
               </div>
 
               {/* Notes */}
-              <div className="mb-3">
+              <div className="mb-2 md:mb-3">
                 <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Notes</label>
                 <textarea
                   value={notes}
                   onChange={e => setNotes(e.target.value)}
                   rows={2}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
+                  className="w-full px-2 md:px-3 py-1.5 md:py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
                   placeholder="Additional context or notes..."
                 />
               </div>
 
               {/* Save annotations button */}
               {hasAnnotationChanges && (
-                <div className="flex justify-end mb-3">
+                <div className="flex justify-end mb-2 md:mb-3">
                   <button
                     onClick={handleSaveAnnotations}
                     disabled={saving}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-sm font-medium rounded-lg transition"
+                    className="flex items-center gap-1.5 px-3 md:px-4 py-1.5 md:py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-xs md:text-sm font-medium rounded-lg transition"
                   >
                     {saving ? 'Saving...' : 'Save Changes'}
                   </button>
@@ -616,7 +607,7 @@ export default function QueuePanel() {
               )}
 
               {/* Technical metadata */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
+              <div className="grid grid-cols-2 gap-1.5 md:gap-2 mb-2 md:mb-3">
                 <MetaCard label="Captured" value={format(new Date(currentVideo.timestamp), 'PPpp')} />
                 <MetaCard label="Uploaded" value={format(new Date(currentVideo.uploaded_at), 'PPpp')} />
                 <MetaCard label="Device ID" value={currentVideo.device_id} mono />
@@ -630,10 +621,10 @@ export default function QueuePanel() {
               {/* Audit log */}
               {auditLog.length > 0 && (
                 <div>
-                  <p className="text-[10px] text-gray-500 uppercase font-bold mb-2">Change Log</p>
-                  <div className="space-y-2">
+                  <p className="text-[10px] text-gray-500 uppercase font-bold mb-1 md:mb-2">Change Log</p>
+                  <div className="space-y-1 md:space-y-2">
                     {auditLog.map(entry => (
-                      <div key={entry.id} className="bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-xs">
+                      <div key={entry.id} className="bg-gray-800/50 border border-gray-700 rounded-lg px-2 md:px-3 py-1.5 md:py-2 text-[10px] md:text-xs">
                         <div className="flex items-center gap-2 text-gray-400 mb-1">
                           <Clock size={10} />
                           <span>{format(new Date(entry.created_at), 'PPpp')}</span>
@@ -759,9 +750,9 @@ function formatEventType(type) {
 
 function MetaCard({ label, value, mono }) {
   return (
-    <div className="bg-gray-800/50 p-3 rounded-lg border border-gray-700">
-      <p className="text-[10px] text-gray-500 uppercase font-bold mb-1">{label}</p>
-      <p className={`text-sm text-gray-300 ${mono ? 'font-mono break-all' : ''}`}>{value}</p>
+    <div className="bg-gray-800/50 p-2 md:p-3 rounded-lg border border-gray-700">
+      <p className="text-[9px] md:text-[10px] text-gray-500 uppercase font-bold mb-0.5">{label}</p>
+      <p className={`text-xs md:text-sm text-gray-300 ${mono ? 'font-mono break-all' : ''} truncate`}>{value}</p>
     </div>
   );
 }
