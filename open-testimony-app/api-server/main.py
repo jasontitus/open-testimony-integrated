@@ -556,23 +556,48 @@ async def upload_video(
                 length=file_size,
                 content_type=content_type,
             )
+
+            # Step 6a: Extract EXIF from photos (server-side)
+            exif = None
+            if media_type == "photo":
+                tmp.seek(0)
+                exif = _extract_exif(tmp.read())
         finally:
             tmp.close()
 
         logger.info(f"Media uploaded to MinIO: {object_name}")
 
         # Step 7: Store metadata in PostgreSQL
+        # For photos, prefer EXIF time/location when the device payload
+        # doesn't carry real values (the EXIF data is unverified but present).
+        record_timestamp = datetime.fromisoformat(payload["timestamp"].replace("Z", "+00:00"))
+        record_lat = payload["location"]["lat"]
+        record_lon = payload["location"]["lon"]
+        exif_metadata = payload.get("exif_metadata")
+
+        if exif and media_type == "photo":
+            exif_metadata = exif["raw"]
+            if exif["datetime"]:
+                try:
+                    record_timestamp = datetime.strptime(exif["datetime"], "%Y:%m:%d %H:%M:%S")
+                except ValueError:
+                    pass
+            if exif["lat"] is not None:
+                record_lat = exif["lat"]
+            if exif["lon"] is not None:
+                record_lon = exif["lon"]
+
         video_record = Video(
             device_id=device_id,
             object_name=object_name,
             file_hash=calculated_hash,
-            timestamp=datetime.fromisoformat(payload["timestamp"].replace("Z", "+00:00")),
-            latitude=payload["location"]["lat"],
-            longitude=payload["location"]["lon"],
+            timestamp=record_timestamp,
+            latitude=record_lat,
+            longitude=record_lon,
             incident_tags=payload.get("incident_tags", []),
             source=source,
             media_type=media_type,
-            exif_metadata=payload.get("exif_metadata"),
+            exif_metadata=exif_metadata,
             verification_status=verification_status,
             metadata_json=metadata_dict,
             uploaded_at=datetime.utcnow()
@@ -598,19 +623,18 @@ async def upload_video(
         logger.info(f"Video record created with ID: {video_record.id}")
 
         # Step 9: Notify bridge service for AI indexing (fire-and-forget)
-        if media_type == "video":
-            try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    await client.post(
-                        f"{os.environ.get('BRIDGE_URL', 'http://bridge:8003')}/hooks/video-uploaded",
-                        json={
-                            "video_id": str(video_record.id),
-                            "object_name": object_name,
-                        },
-                    )
-                logger.info(f"Bridge notified for video {video_record.id}")
-            except Exception as e:
-                logger.warning(f"Bridge notification failed (non-fatal): {e}")
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(
+                    f"{os.environ.get('BRIDGE_URL', 'http://bridge:8003')}/hooks/video-uploaded",
+                    json={
+                        "video_id": str(video_record.id),
+                        "object_name": object_name,
+                    },
+                )
+            logger.info(f"Bridge notified for {media_type} {video_record.id}")
+        except Exception as e:
+            logger.warning(f"Bridge notification failed (non-fatal): {e}")
 
         return {
             "status": "success",

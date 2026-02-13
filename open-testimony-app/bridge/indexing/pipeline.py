@@ -20,6 +20,43 @@ from minio_utils import download_video
 logger = logging.getLogger(__name__)
 
 
+PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".tiff", ".bmp", ".gif"}
+
+
+def is_photo(object_name: str) -> bool:
+    """Detect whether the object is a photo based on its MinIO path or extension."""
+    if object_name.startswith("photos/"):
+        return True
+    ext = os.path.splitext(object_name)[1].lower()
+    return ext in PHOTO_EXTENSIONS
+
+
+def extract_photo_frame(photo_path: str, video_id_for_thumbs=None):
+    """Load a photo as a single frame for the indexing pipeline.
+
+    Returns a list with one (frame_num, timestamp_ms, pil_image) tuple,
+    matching the format of extract_frames() output so downstream stages
+    can process photos and videos identically.
+    """
+    pil_img = Image.open(photo_path).convert("RGB")
+
+    # Skip very dark images (same heuristic as video frames)
+    stat = ImageStat.Stat(pil_img.convert("L"))
+    if stat.mean[0] < 15:
+        logger.warning(f"Photo is too dark (mean brightness {stat.mean[0]:.1f}), indexing anyway")
+
+    # Save thumbnail for search result previews
+    if video_id_for_thumbs:
+        thumb_dir = os.path.join(settings.THUMBNAIL_DIR, str(video_id_for_thumbs))
+        os.makedirs(thumb_dir, exist_ok=True)
+        thumb_path = os.path.join(thumb_dir, "0.jpg")
+        pil_img.resize((320, int(320 * pil_img.height / pil_img.width))).save(
+            thumb_path, "JPEG", quality=75
+        )
+
+    return [(0, 0, pil_img)]
+
+
 def extract_frames(video_path: str, interval_sec: float = 2.0, video_id_for_thumbs=None):
     """Extract frames from a video at a given interval.
 
@@ -517,15 +554,22 @@ def fix_video_indexes(video_id: str, object_name: str, db: Session):
             FaceDetection.video_id == video_id
         ).count()
 
+        # Detect whether this is a photo (single image) vs a video
+        media_is_photo = is_photo(object_name)
+        if media_is_photo:
+            logger.info(f"[fix] {video_id}: detected as PHOTO — will skip transcript/clips")
+
         # Use both the actual DB count AND the job flag to decide what's needed.
         # The flag means "we already ran this stage" — even if the result was 0 rows
         # (e.g. silent video → 0 transcript segments, all-black frames → 0 captions).
         need_visual = has_visual == 0 and not job.visual_indexed
         need_captions = (has_captions == 0 and not job.caption_indexed
                          and settings.CAPTION_ENABLED)
-        need_transcript = has_transcript == 0 and not job.transcript_indexed
+        # Photos have no audio track or temporal dimension
+        need_transcript = (has_transcript == 0 and not job.transcript_indexed
+                           and not media_is_photo)
         need_clips = (has_clips == 0 and not job.clip_indexed
-                      and settings.CLIP_ENABLED)
+                      and settings.CLIP_ENABLED and not media_is_photo)
         need_faces = (has_faces == 0 and not job.face_indexed
                       and settings.FACE_CLUSTERING_ENABLED)
         need_frames = need_visual or need_captions or need_faces
@@ -568,13 +612,17 @@ def fix_video_indexes(video_id: str, object_name: str, db: Session):
         # Download video (needed for any generation)
         local_path = download_video(object_name, str(video_id))
 
-        # Extract frames if visual or captions need them
+        # Extract frames if visual, captions, or faces need them
         all_frames = None
         if need_frames:
-            logger.info(f"[fix] Extracting frames for {video_id}")
-            all_frames = list(extract_frames(
-                local_path, settings.FRAME_INTERVAL_SEC, video_id_for_thumbs=video_id
-            ))
+            if media_is_photo:
+                logger.info(f"[fix] Loading photo frame for {video_id}")
+                all_frames = extract_photo_frame(local_path, video_id_for_thumbs=video_id)
+            else:
+                logger.info(f"[fix] Extracting video frames for {video_id}")
+                all_frames = list(extract_frames(
+                    local_path, settings.FRAME_INTERVAL_SEC, video_id_for_thumbs=video_id
+                ))
             logger.info(f"[fix] Extracted {len(all_frames)} frames")
 
         # Stage 1: Visual embeddings
