@@ -122,9 +122,10 @@ services:
       # Face clustering (InsightFace buffalo_l + HDBSCAN)
       - FACE_CLUSTERING_ENABLED=true
       - FACE_MODEL_NAME=buffalo_l
-      - FACE_DETECTION_THRESHOLD=0.5
+      - FACE_DETECTION_THRESHOLD=0.65
+      - FACE_MIN_SIZE=50
       - FACE_CLUSTER_MIN_SIZE=3
-      - FACE_SIMILARITY_THRESHOLD=0.4
+      - FACE_SIMILARITY_THRESHOLD=0.3
     depends_on:
       - db
       - minio

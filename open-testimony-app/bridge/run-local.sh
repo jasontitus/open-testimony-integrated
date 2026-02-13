@@ -72,9 +72,10 @@ export CLIP_ACTION_CAPTIONING="false"
 # Face clustering (InsightFace buffalo_l + HDBSCAN)
 export FACE_CLUSTERING_ENABLED="true"
 export FACE_MODEL_NAME="buffalo_l"
-export FACE_DETECTION_THRESHOLD="0.5"
+export FACE_DETECTION_THRESHOLD="0.65"
+export FACE_MIN_SIZE="50"
 export FACE_CLUSTER_MIN_SIZE="3"
-export FACE_SIMILARITY_THRESHOLD="0.4"
+export FACE_SIMILARITY_THRESHOLD="0.3"
 
 # MPS GPU acceleration on Apple Silicon
 export DEVICE="mps"
