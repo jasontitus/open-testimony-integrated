@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
 import api from './api';
 import { AuthProvider, useAuth } from './auth';
 import LoginPage from './components/LoginPage';
@@ -10,6 +11,7 @@ import VideoDetailPanel from './components/VideoDetailPanel';
 import AdminPanel from './components/AdminPanel';
 import AISearchPanel from './components/AISearchPanel';
 import QueuePanel from './components/QueuePanel';
+import FaceClusterPanel from './components/FaceClusterPanel';
 
 // Fix for Leaflet marker icons in React
 import L from 'leaflet';
@@ -50,7 +52,7 @@ function AuthGate() {
 
 const emptyFilters = { search: '', tags: [], category: '', mediaType: '', source: '' };
 
-const VALID_HASHES = ['map', 'list', 'ai-search', 'queue', 'admin'];
+const VALID_HASHES = ['map', 'list', 'ai-search', 'queue', 'faces', 'admin'];
 
 function readHash() {
   const raw = window.location.hash.replace('#', '');
@@ -87,6 +89,7 @@ function Dashboard() {
   const [tagCounts, setTagCounts] = useState([]);
   const [categoryCounts, setCategoryCounts] = useState([]);
   const [availableTags, setAvailableTags] = useState([]);
+  const [facesEnabled, setFacesEnabled] = useState(false);
 
   const fetchCounts = useCallback(async () => {
     try {
@@ -126,6 +129,14 @@ function Dashboard() {
 
   useEffect(() => { fetchVideos(); }, [fetchVideos]);
   useEffect(() => { fetchCounts(); }, [fetchCounts]);
+
+  // Check if face clustering is enabled on the bridge
+  useEffect(() => {
+    const aiApi = axios.create({ baseURL: '/ai-search', withCredentials: true });
+    aiApi.get('/faces/enabled')
+      .then(res => setFacesEnabled(res.data.enabled))
+      .catch(() => setFacesEnabled(false));
+  }, []);
 
   useEffect(() => {
     const onPopState = () => {
@@ -200,12 +211,13 @@ function Dashboard() {
           const { viewMode: vm, showAdmin: sa } = navigate(mode);
           setViewMode(vm);
           setShowAdmin(sa);
-          if (mode === 'ai-search' || mode === 'queue') {
+          if (mode === 'ai-search' || mode === 'queue' || mode === 'faces') {
             setSelectedVideo(null);
             setInitialTimestampMs(null);
           }
         }}
         showAdmin={showAdmin}
+        facesEnabled={facesEnabled}
         onToggleAdmin={() => {
           const hash = showAdmin ? 'map' : 'admin';
           const { viewMode: vm, showAdmin: sa } = navigate(hash);
@@ -221,6 +233,8 @@ function Dashboard() {
       <main className="flex-1 flex overflow-hidden">
         {showAdmin ? (
           <AdminPanel />
+        ) : viewMode === 'faces' ? (
+          <FaceClusterPanel />
         ) : viewMode === 'queue' ? (
           <QueuePanel />
         ) : viewMode === 'ai-search' ? (

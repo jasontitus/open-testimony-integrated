@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     Integer,
     String,
     Text,
@@ -99,6 +100,49 @@ class SearchQuery(Base):
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
 
 
+class FaceDetection(Base):
+    """Individual face detected in a video frame, with embedding for clustering."""
+    __tablename__ = "face_detections"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    video_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    frame_num = Column(Integer, nullable=False)
+    timestamp_ms = Column(Integer, nullable=False)
+    # Bounding box in the original frame (x1, y1, x2, y2)
+    bbox_x1 = Column(Integer, nullable=False)
+    bbox_y1 = Column(Integer, nullable=False)
+    bbox_x2 = Column(Integer, nullable=False)
+    bbox_y2 = Column(Integer, nullable=False)
+    # Detection confidence from SCRFD
+    detection_score = Column(Float, nullable=False)
+    # ArcFace embedding (512-dim)
+    embedding = Column(Vector(settings.FACE_EMBEDDING_DIM))
+    # Cluster assignment (null = unassigned / noise)
+    cluster_id = Column(Integer, nullable=True, index=True)
+    # Thumbnail filename (relative to FACE_THUMBNAIL_DIR/video_id/)
+    thumbnail_path = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
+
+
+class FaceCluster(Base):
+    """A cluster of face detections representing a single person."""
+    __tablename__ = "face_clusters"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # Representative face detection id (best quality face in the cluster)
+    representative_face_id = Column(BigInteger, nullable=True)
+    # Optional user-assigned label
+    label = Column(String(200), nullable=True)
+    # Number of faces in this cluster
+    face_count = Column(Integer, nullable=False, default=0)
+    # Number of distinct videos this person appears in
+    video_count = Column(Integer, nullable=False, default=0)
+    # Mean embedding for incremental assignment
+    centroid = Column(Vector(settings.FACE_EMBEDDING_DIM))
+    created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
+
+
 class VideoIndexStatus(Base):
     __tablename__ = "video_index_status"
 
@@ -112,10 +156,12 @@ class VideoIndexStatus(Base):
     transcript_indexed = Column(Boolean, default=False)
     caption_indexed = Column(Boolean, default=False)
     clip_indexed = Column(Boolean, default=False)
+    face_indexed = Column(Boolean, default=False)
     frame_count = Column(Integer, nullable=True)
     segment_count = Column(Integer, nullable=True)
     caption_count = Column(Integer, nullable=True)
     clip_count = Column(Integer, nullable=True)
+    face_count = Column(Integer, nullable=True)
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
     completed_at = Column(DateTime(timezone=True), nullable=True)
