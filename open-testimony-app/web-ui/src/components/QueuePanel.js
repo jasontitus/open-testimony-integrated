@@ -253,13 +253,22 @@ export default function QueuePanel() {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
       {/* Queue Header */}
-      <div className="shrink-0 bg-gray-800 border-b border-gray-700 px-4 py-3">
-        <div className="flex items-center justify-between mb-3">
+      <div className="shrink-0 bg-gray-800 border-b border-gray-700 px-4 py-2">
+        {/* Title row with inline progress */}
+        <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-3">
             <h2 className="text-sm font-bold text-gray-200 uppercase tracking-wider">Review Queue</h2>
-            <span className="text-xs text-gray-500">
-              {stats.reviewed + stats.flagged} / {stats.total} done
-            </span>
+            <div className="flex items-center gap-2">
+              <div className="w-16 bg-gray-700 rounded-full h-1.5">
+                <div
+                  className="bg-green-500 h-1.5 rounded-full transition-all duration-500"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
+              <span className="text-[10px] text-gray-500">
+                {stats.reviewed + stats.flagged}/{stats.total}
+              </span>
+            </div>
           </div>
           <button
             onClick={() => { fetchQueue(); fetchStats(); fetchTags(); }}
@@ -270,16 +279,8 @@ export default function QueuePanel() {
           </button>
         </div>
 
-        {/* Progress bar */}
-        <div className="w-full bg-gray-700 rounded-full h-2 mb-3">
-          <div
-            className="bg-green-500 h-2 rounded-full transition-all duration-500"
-            style={{ width: `${progressPct}%` }}
-          />
-        </div>
-
-        {/* Status tabs */}
-        <div className="flex items-center gap-2 mb-3 flex-wrap">
+        {/* Status tabs (icon + count only) and sort/filter on same row */}
+        <div className="flex items-center gap-1.5 flex-wrap">
           {STATUS_TABS.map(tab => {
             const Icon = tab.icon;
             const count = stats[tab.value] || 0;
@@ -288,26 +289,23 @@ export default function QueuePanel() {
               <button
                 key={tab.value}
                 onClick={() => setStatusFilter(tab.value)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition border ${
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition border ${
                   active
                     ? tab.value === 'pending' ? 'bg-yellow-600/20 border-yellow-500/50 text-yellow-300'
                     : tab.value === 'flagged' ? 'bg-orange-600/20 border-orange-500/50 text-orange-300'
                     : 'bg-green-600/20 border-green-500/50 text-green-300'
                     : 'bg-gray-900 border-gray-700 text-gray-500 hover:text-gray-300 hover:border-gray-600'
                 }`}
+                title={tab.label}
               >
                 <Icon size={12} />
-                {tab.label}
-                <span className={`ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] ${
-                  active ? 'bg-white/10' : 'bg-gray-800'
-                }`}>{count}</span>
+                <span className="text-[10px]">{count}</span>
               </button>
             );
           })}
-        </div>
 
-        {/* Sort and filter controls */}
-        <div className="flex items-center gap-2 flex-wrap">
+          <div className="w-px h-4 bg-gray-700" />
+
           {/* Sort */}
           <div className="flex items-center gap-1.5">
             <ArrowUpDown size={12} className="text-gray-500" />
@@ -442,7 +440,7 @@ export default function QueuePanel() {
           ) : (
             <div className="max-w-4xl mx-auto w-full">
               {/* Navigation bar */}
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   {/* Back to list — mobile only */}
                   <button
@@ -471,6 +469,12 @@ export default function QueuePanel() {
                   >
                     <ChevronRight size={16} />
                   </button>
+                  {/* Inline badges */}
+                  <div className="hidden md:flex items-center gap-1.5 ml-1">
+                    <VerificationBadge status={currentVideo.verification_status} />
+                    <SourceBadge source={currentVideo.source} />
+                    <MediaTypeBadge mediaType={currentVideo.media_type} />
+                  </div>
                 </div>
 
                 {/* Review action buttons */}
@@ -522,7 +526,7 @@ export default function QueuePanel() {
               )}
 
               {/* Media player */}
-              <div className="aspect-video bg-black rounded-xl overflow-hidden mb-4">
+              <div className="aspect-video bg-black rounded-xl overflow-hidden mb-3">
                 {videoUrl ? (
                   detail?.media_type === 'photo' ? (
                     <img src={videoUrl} alt="Testimony" className="w-full h-full object-contain" />
@@ -536,22 +540,16 @@ export default function QueuePanel() {
                 )}
               </div>
 
-              {/* Badges */}
-              <div className="flex items-center gap-2 flex-wrap mb-4">
+              {/* Badges — mobile only (on desktop these are in the nav bar) */}
+              <div className="flex md:hidden items-center gap-2 flex-wrap mb-3">
                 <VerificationBadge status={currentVideo.verification_status} />
                 <SourceBadge source={currentVideo.source} />
                 <MediaTypeBadge mediaType={currentVideo.media_type} />
-                {currentVideo.reviewed_by && (
-                  <span className="flex items-center gap-1 px-2 py-0.5 bg-gray-800 border border-gray-700 rounded-full text-[10px] text-gray-400">
-                    <User size={10} />
-                    {currentVideo.reviewed_by}
-                  </span>
-                )}
               </div>
 
               {/* Category & Tags */}
               {detail && (
-                <div className="mb-4">
+                <div className="mb-3">
                   <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Category & Tags</label>
                   <QuickTagMenu
                     inline
@@ -566,7 +564,7 @@ export default function QueuePanel() {
               )}
 
               {/* Location */}
-              <div className="mb-4">
+              <div className="mb-3">
                 <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Location Description</label>
                 {detail?.location && detail?.source === 'live' ? (
                   <div className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-400">
@@ -593,7 +591,7 @@ export default function QueuePanel() {
               </div>
 
               {/* Notes */}
-              <div className="mb-4">
+              <div className="mb-3">
                 <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Notes</label>
                 <textarea
                   value={notes}
@@ -606,7 +604,7 @@ export default function QueuePanel() {
 
               {/* Save annotations button */}
               {hasAnnotationChanges && (
-                <div className="flex justify-end mb-4">
+                <div className="flex justify-end mb-3">
                   <button
                     onClick={handleSaveAnnotations}
                     disabled={saving}
@@ -618,7 +616,7 @@ export default function QueuePanel() {
               )}
 
               {/* Technical metadata */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
                 <MetaCard label="Captured" value={format(new Date(currentVideo.timestamp), 'PPpp')} />
                 <MetaCard label="Uploaded" value={format(new Date(currentVideo.uploaded_at), 'PPpp')} />
                 <MetaCard label="Device ID" value={currentVideo.device_id} mono />
