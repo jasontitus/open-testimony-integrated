@@ -6,30 +6,41 @@ import sys
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
+# Add parent dir to path so imports work
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+TEST_DATABASE_URL = os.environ.get(
+    "TEST_DATABASE_URL",
+    "postgresql://user:pass@localhost:5432/opentestimony_test",
+)
+
+# Override DATABASE_URL *before* importing database/main modules so the
+# production engine also points at the test database (main.py runs
+# Base.metadata.create_all at import time).
+os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-# Add parent dir to path so imports work
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from database import Base, get_db
 from models import Device, Video, AuditLog, User
-
-TEST_DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL",
-    "postgresql://user:pass@db:5432/opentestimony_test",
-)
 
 
 @pytest.fixture(scope="session")
 def db_engine():
-    """Create a test database engine."""
+    """Create a test database engine.
+
+    Drop and recreate all tables at session start so the schema always
+    matches the current models (stale columns from previous runs are wiped).
+    Tables are left in place at session end so the running Docker app isn't
+    disrupted.
+    """
     engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     yield engine
-    Base.metadata.drop_all(bind=engine)
     engine.dispose()
 
 
@@ -43,12 +54,11 @@ def TestingSessionLocal(db_engine):
 def clean_tables(db_engine):
     """Truncate all tables between tests for isolation."""
     yield
-    with db_engine.connect() as conn:
+    with db_engine.begin() as conn:
         conn.execute(text("DELETE FROM audit_log"))
         conn.execute(text("DELETE FROM videos"))
         conn.execute(text("DELETE FROM devices"))
         conn.execute(text("DELETE FROM users"))
-        conn.commit()
 
 
 @pytest.fixture

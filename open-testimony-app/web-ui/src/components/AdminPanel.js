@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
-import { UserPlus, Key, Shield, AlertCircle, Tag, Trash2, RefreshCw, Database, Upload, CheckCircle, XCircle, FileVideo, Image, Plus, ScrollText, Download, ChevronDown, ChevronRight, Filter } from 'lucide-react';
+import { UserPlus, Key, Shield, AlertCircle, Tag, Trash2, RefreshCw, Database, Upload, CheckCircle, XCircle, FileVideo, Image, Plus, ScrollText, Download, ChevronDown, ChevronRight, Filter, Search, TrendingUp, Clock } from 'lucide-react';
 import axios from 'axios';
 import api from '../api';
 
@@ -80,6 +80,9 @@ export default function AdminPanel() {
 
         {/* Indexing Management */}
         <IndexingManagement />
+
+        {/* Top Searches */}
+        <TopSearches />
 
         {/* Audit Log */}
         <AuditLogViewer />
@@ -626,14 +629,21 @@ function TagManagement() {
 
 function IndexingManagement() {
   const [stats, setStats] = useState(null);
+  const [faceStats, setFaceStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reindexing, setReindexing] = useState(false);
+  const [reprocessingFaces, setReprocessingFaces] = useState(false);
+  const [reclusteringFaces, setReclusteringFaces] = useState(false);
   const [message, setMessage] = useState(null);
 
   const fetchStats = useCallback(async () => {
     try {
-      const res = await aiApi.get('/indexing/status');
-      setStats(res.data);
+      const [indexRes, faceRes] = await Promise.all([
+        aiApi.get('/indexing/status'),
+        aiApi.get('/faces/stats').catch(() => ({ data: null })),
+      ]);
+      setStats(indexRes.data);
+      setFaceStats(faceRes.data);
     } catch (err) {
       console.error('Failed to load indexing stats:', err);
     } finally {
@@ -662,10 +672,12 @@ function IndexingManagement() {
     }
   };
 
+  // Combine pending + pending_fix + pending_visual into one "Pending" count for display
+  const pendingCount = (stats?.pending ?? 0) + (stats?.pending_visual ?? 0) + (stats?.pending_fix ?? 0);
   const statusItems = stats ? [
     { label: 'Completed', value: stats.completed ?? 0, color: 'text-green-400' },
     { label: 'Processing', value: stats.processing ?? 0, color: 'text-yellow-400' },
-    { label: 'Pending', value: stats.pending ?? 0, color: 'text-blue-400' },
+    { label: 'Pending', value: pendingCount, color: 'text-blue-400' },
     { label: 'Failed', value: stats.failed ?? 0, color: 'text-red-400' },
   ] : [];
 
@@ -676,14 +688,62 @@ function IndexingManagement() {
           <Database size={20} className="text-purple-400" />
           <h2 className="text-xl font-bold text-white">AI Indexing</h2>
         </div>
-        <button
-          onClick={handleReindexAll}
-          disabled={reindexing}
-          className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-purple-800 text-white text-sm font-medium rounded-lg transition"
-        >
-          <RefreshCw size={14} className={reindexing ? 'animate-spin' : ''} />
-          {reindexing ? 'Queuing...' : 'Re-index All Videos'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleReindexAll}
+            disabled={reindexing}
+            className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-purple-800 text-white text-sm font-medium rounded-lg transition"
+          >
+            <RefreshCw size={14} className={reindexing ? 'animate-spin' : ''} />
+            {reindexing ? 'Queuing...' : 'Re-index All Videos'}
+          </button>
+          {faceStats?.enabled && (
+            <>
+              <button
+                onClick={async () => {
+                  if (!window.confirm('Re-process all faces? This will delete existing face data and re-detect faces in all videos.')) return;
+                  setReprocessingFaces(true);
+                  setMessage(null);
+                  try {
+                    const res = await aiApi.post('/faces/reprocess-all');
+                    setMessage({ type: 'success', text: `Queued ${res.data.queued} videos for face re-processing` });
+                    fetchStats();
+                  } catch (err) {
+                    setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to trigger face reprocess' });
+                  } finally {
+                    setReprocessingFaces(false);
+                  }
+                }}
+                disabled={reprocessingFaces}
+                className="flex items-center gap-1.5 px-4 py-2 bg-orange-600 hover:bg-orange-500 disabled:bg-orange-800 text-white text-sm font-medium rounded-lg transition"
+              >
+                <RefreshCw size={14} className={reprocessingFaces ? 'animate-spin' : ''} />
+                {reprocessingFaces ? 'Queuing...' : 'Re-process Faces'}
+              </button>
+              <button
+                onClick={async () => {
+                  if (!window.confirm('Run full face re-clustering? This may take a while for large datasets.')) return;
+                  setReclusteringFaces(true);
+                  setMessage(null);
+                  try {
+                    const res = await aiApi.post('/faces/recluster');
+                    setMessage({ type: 'success', text: `Re-clustering complete: ${res.data.num_clusters} clusters found, ${res.data.num_noise} noise faces` });
+                    fetchStats();
+                  } catch (err) {
+                    setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to trigger face re-clustering' });
+                  } finally {
+                    setReclusteringFaces(false);
+                  }
+                }}
+                disabled={reclusteringFaces}
+                className="flex items-center gap-1.5 px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-teal-800 text-white text-sm font-medium rounded-lg transition"
+              >
+                <RefreshCw size={14} className={reclusteringFaces ? 'animate-spin' : ''} />
+                {reclusteringFaces ? 'Clustering...' : 'Re-cluster Faces'}
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {message && (
@@ -711,6 +771,50 @@ function IndexingManagement() {
               </div>
             ))}
           </div>
+          {faceStats?.enabled && (
+            <div className="mt-4 pt-4 border-t border-gray-700">
+              <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-3">Face Detection &amp; Clustering</p>
+
+              {/* Face processing progress bar */}
+              {faceStats.face_pending > 0 && (
+                <div className="mb-4 p-3 bg-orange-900/20 border border-orange-500/30 rounded-lg">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs text-orange-300 font-medium">
+                      Processing faces: {faceStats.face_done} of {faceStats.total_videos} videos done
+                    </span>
+                    <span className="text-xs text-orange-400 font-mono">
+                      {faceStats.face_pending} remaining
+                    </span>
+                  </div>
+                  <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-orange-500 rounded-full transition-all duration-500"
+                      style={{ width: `${faceStats.total_videos > 0 ? (faceStats.face_done / faceStats.total_videos) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-4 gap-4">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-orange-400">{faceStats.total_clusters}</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">People</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-teal-400">{faceStats.total_faces}</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Faces Detected</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-green-400">{faceStats.face_done}</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Videos Done</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-gray-400">{faceStats.unassigned_faces}</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Unclustered</div>
+                </div>
+              </div>
+            </div>
+          )}
           <p className="text-[10px] text-gray-600 mt-3">
             The bridge service polls for pending jobs every 10 seconds. Re-indexing clears all embeddings and re-queues every video.
           </p>
@@ -718,6 +822,137 @@ function IndexingManagement() {
       ) : (
         <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 text-center text-gray-500">
           Could not load indexing status
+        </div>
+      )}
+    </div>
+  );
+}
+
+const MODE_LABELS = {
+  visual: 'Visual',
+  transcript: 'Transcript',
+  transcript_exact: 'Transcript (exact)',
+  caption: 'Caption',
+  caption_exact: 'Caption (exact)',
+  combined: 'Combined',
+  clips: 'Clips',
+  actions: 'Actions',
+  actions_exact: 'Actions (exact)',
+};
+
+function TopSearches() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState(30);
+
+  const fetchTopSearches = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await aiApi.get('/search/top-queries', { params: { days, limit: 50 } });
+      setData(res.data);
+    } catch (err) {
+      console.error('Failed to load top searches:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [days]);
+
+  useEffect(() => { fetchTopSearches(); }, [fetchTopSearches]);
+
+  const maxCount = data?.queries?.[0]?.count || 1;
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <TrendingUp size={20} className="text-amber-400" />
+          <h2 className="text-xl font-bold text-white">Top Searches</h2>
+          {data && (
+            <span className="text-xs text-gray-500 ml-2">
+              {data.total_searches} total searches
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">Period:</span>
+          {[7, 30, 90].map(d => (
+            <button
+              key={d}
+              onClick={() => setDays(d)}
+              className={`px-2.5 py-1 text-xs rounded-lg transition ${
+                days === d
+                  ? 'bg-amber-600 text-white font-medium'
+                  : 'bg-gray-800 text-gray-400 hover:text-white border border-gray-700'
+              }`}
+            >
+              {d}d
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-500"></div>
+        </div>
+      ) : !data || data.queries.length === 0 ? (
+        <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 text-center text-gray-500">
+          No searches recorded in the last {days} days
+        </div>
+      ) : (
+        <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-gray-700">
+                <th className="text-left px-4 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider w-8">#</th>
+                <th className="text-left px-4 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Query</th>
+                <th className="text-left px-4 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Count</th>
+                <th className="text-left px-4 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Modes</th>
+                <th className="text-left px-4 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Avg Results</th>
+                <th className="text-left px-4 py-3 text-[10px] text-gray-500 uppercase font-bold tracking-wider">Last Searched</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.queries.map((q, i) => (
+                <tr key={i} className="border-b border-gray-700/50 hover:bg-gray-750">
+                  <td className="px-4 py-2.5 text-xs text-gray-600">{i + 1}</td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <Search size={12} className="text-gray-600 flex-shrink-0" />
+                      <span className="text-sm text-gray-200">{q.query}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-mono text-amber-400">{q.count}</span>
+                      <div className="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-amber-500 rounded-full"
+                          style={{ width: `${(q.count / maxCount) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex flex-wrap gap-1">
+                      {q.modes.map(m => (
+                        <span key={m} className="px-1.5 py-0.5 bg-gray-700/50 border border-gray-600 rounded text-[10px] text-gray-400">
+                          {MODE_LABELS[m] || m}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5 text-xs text-gray-400">{q.avg_results}</td>
+                  <td className="px-4 py-2.5 text-xs text-gray-500">
+                    <div className="flex items-center gap-1">
+                      <Clock size={10} />
+                      {q.last_searched ? format(new Date(q.last_searched), 'MMM d, HH:mm') : '-'}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

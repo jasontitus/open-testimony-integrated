@@ -20,6 +20,7 @@ services:
     build: ./api-server
     volumes:
       - ./api-server:/app
+      - api_logs:/app/logs
     environment:
       - DATABASE_URL=postgresql://user:pass@db:5432/opentestimony
       - MINIO_ENDPOINT=minio:9000
@@ -84,6 +85,7 @@ services:
     volumes:
       - ./bridge:/app
       - bridge_temp:/data/temp
+      - face_thumbnails:/data/face_thumbnails
     environment:
       - DATABASE_URL=postgresql://user:pass@db:5432/opentestimony
       - MINIO_ENDPOINT=minio:9000
@@ -92,10 +94,9 @@ services:
       - MINIO_BUCKET=opentestimony-videos
       - JWT_SECRET_KEY=change-me-in-production-use-a-real-secret
       # Model configuration
-      - VISION_MODEL_FAMILY=hf_siglip
-      - VISION_MODEL_NAME=google/siglip2-so400m-patch16-naflex
-      - VISION_MODEL_PRETRAINED=webli
-      - VISION_EMBEDDING_DIM=1152
+      - VISION_MODEL_FAMILY=pe_core
+      - VISION_MODEL_NAME=PE-Core-L14-336
+      - VISION_EMBEDDING_DIM=1024
       - TRANSCRIPT_MODEL_NAME=Qwen/Qwen3-Embedding-8B
       - TRANSCRIPT_EMBEDDING_DIM=4096
       - WHISPER_MODEL=large-v3
@@ -112,6 +113,19 @@ services:
       - BATCH_SIZE=16
       - WORKER_POLL_INTERVAL=10
       - OT_API_URL=http://api:8000
+      # Video clip understanding (temporal windows for action/motion detection)
+      - CLIP_ENABLED=true
+      - CLIP_ACTION_CAPTIONING=false
+      - CLIP_WINDOW_FRAMES=16
+      - CLIP_WINDOW_STRIDE=8
+      - CLIP_FPS=4.0
+      # Face clustering (InsightFace buffalo_l + HDBSCAN)
+      - FACE_CLUSTERING_ENABLED=true
+      - FACE_MODEL_NAME=buffalo_l
+      - FACE_DETECTION_THRESHOLD=0.65
+      - FACE_MIN_SIZE=50
+      - FACE_CLUSTER_MIN_SIZE=3
+      - FACE_SIMILARITY_THRESHOLD=0.3
     depends_on:
       - db
       - minio
@@ -129,3 +143,5 @@ volumes:
   minio_data:
   postgres_data:
   bridge_temp:
+  face_thumbnails:
+  api_logs:

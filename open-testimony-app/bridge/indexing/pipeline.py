@@ -11,10 +11,50 @@ from PIL import Image, ImageStat
 from sqlalchemy.orm import Session
 
 from config import settings
-from models import CaptionEmbedding, FrameEmbedding, TranscriptEmbedding, VideoIndexStatus
+from models import (
+    ActionEmbedding, CaptionEmbedding, ClipEmbedding, FaceDetection,
+    FrameEmbedding, TranscriptEmbedding, VideoIndexStatus,
+)
 from minio_utils import download_video
 
 logger = logging.getLogger(__name__)
+
+
+PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".tiff", ".bmp", ".gif"}
+
+
+def is_photo(object_name: str) -> bool:
+    """Detect whether the object is a photo based on its MinIO path or extension."""
+    if object_name.startswith("photos/"):
+        return True
+    ext = os.path.splitext(object_name)[1].lower()
+    return ext in PHOTO_EXTENSIONS
+
+
+def extract_photo_frame(photo_path: str, video_id_for_thumbs=None):
+    """Load a photo as a single frame for the indexing pipeline.
+
+    Returns a list with one (frame_num, timestamp_ms, pil_image) tuple,
+    matching the format of extract_frames() output so downstream stages
+    can process photos and videos identically.
+    """
+    pil_img = Image.open(photo_path).convert("RGB")
+
+    # Skip very dark images (same heuristic as video frames)
+    stat = ImageStat.Stat(pil_img.convert("L"))
+    if stat.mean[0] < 15:
+        logger.warning(f"Photo is too dark (mean brightness {stat.mean[0]:.1f}), indexing anyway")
+
+    # Save thumbnail for search result previews
+    if video_id_for_thumbs:
+        thumb_dir = os.path.join(settings.THUMBNAIL_DIR, str(video_id_for_thumbs))
+        os.makedirs(thumb_dir, exist_ok=True)
+        thumb_path = os.path.join(thumb_dir, "0.jpg")
+        pil_img.resize((320, int(320 * pil_img.height / pil_img.width))).save(
+            thumb_path, "JPEG", quality=75
+        )
+
+    return [(0, 0, pil_img)]
 
 
 def extract_frames(video_path: str, interval_sec: float = 2.0, video_id_for_thumbs=None):
@@ -91,6 +131,88 @@ def encode_frames_batch(frames, vision_model, preprocess, device):
         features = torch.nn.functional.normalize(features, dim=-1)
 
     return features.cpu().float().numpy()
+
+
+def extract_clip_windows(video_path: str, clip_fps: float = 4.0,
+                         window_size: int = 16, stride: int = 8):
+    """Extract overlapping windows of frames for temporal/motion understanding.
+
+    Extracts frames at clip_fps rate, then yields sliding windows of
+    window_size frames with the given stride. Each window captures a
+    few seconds of continuous video.
+
+    Yields (window_index, start_ms, end_ms, start_frame, end_frame, [pil_images])
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {video_path}")
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frame_interval = max(1, int(fps / clip_fps))
+    frame_idx = 0
+
+    # First pass: extract all frames at clip_fps rate
+    all_frames = []  # list of (frame_idx_in_video, timestamp_ms, pil_image)
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        if frame_idx % frame_interval == 0:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(rgb)
+
+            # Skip very dark frames
+            stat = ImageStat.Stat(pil_img.convert("L"))
+            if stat.mean[0] >= 15:
+                timestamp_ms = int((frame_idx / fps) * 1000)
+                all_frames.append((frame_idx, timestamp_ms, pil_img))
+
+        frame_idx += 1
+
+    cap.release()
+
+    if len(all_frames) < 2:
+        return
+
+    # Slide windows across the extracted frames
+    window_idx = 0
+    for start in range(0, len(all_frames), stride):
+        end = start + window_size
+        window_frames = all_frames[start:end]
+
+        # Skip windows that are too small (less than half the window size)
+        if len(window_frames) < max(2, window_size // 2):
+            break
+
+        start_ms = window_frames[0][1]
+        end_ms = window_frames[-1][1]
+        start_frame = window_frames[0][0]
+        end_frame = window_frames[-1][0]
+        images = [f[2] for f in window_frames]
+
+        yield (window_idx, start_ms, end_ms, start_frame, end_frame, images)
+        window_idx += 1
+
+
+def encode_clip_window(frames, vision_model, preprocess, device):
+    """Encode a clip window by mean-pooling per-frame embeddings.
+
+    Takes a list of PIL images (one clip window), encodes each frame
+    individually with the vision model, then mean-pools and re-normalizes
+    to produce a single embedding that captures the temporal content.
+
+    Returns a numpy array of shape (embedding_dim,).
+    """
+    # Encode all frames in the window as a batch
+    frame_embeddings = encode_frames_batch(frames, vision_model, preprocess, device)
+    # Mean-pool across the temporal dimension
+    clip_embedding = np.mean(frame_embeddings, axis=0)
+    # Re-normalize to unit length
+    norm = np.linalg.norm(clip_embedding)
+    if norm > 0:
+        clip_embedding = clip_embedding / norm
+    return clip_embedding
 
 
 _whisper_model = None
@@ -245,6 +367,121 @@ def _store_caption_embeddings(video_id, all_frames, db, device):
     ).count()
 
 
+def _store_clip_embeddings(video_id, local_path, db, device):
+    """Extract overlapping clip windows, encode with mean-pooled vision embeddings,
+    and optionally generate action captions via Gemini.
+
+    Returns the total number of clip + action embeddings stored.
+    """
+    import time as _time
+    import main as bridge_main
+
+    logger.info(f"Extracting clip windows for {video_id}")
+    t0 = _time.perf_counter()
+
+    windows = list(extract_clip_windows(
+        local_path,
+        clip_fps=settings.CLIP_FPS,
+        window_size=settings.CLIP_WINDOW_FRAMES,
+        stride=settings.CLIP_WINDOW_STRIDE,
+    ))
+    t1 = _time.perf_counter()
+    logger.info(f"Extracted {len(windows)} clip windows in {t1-t0:.1f}s")
+
+    if not windows:
+        return 0
+
+    # Stage A: Vision clip embeddings (mean-pooled per-frame embeddings)
+    clip_count = 0
+    for win_idx, start_ms, end_ms, start_frame, end_frame, images in windows:
+        with bridge_main.vision_lock:
+            clip_emb = encode_clip_window(
+                images, bridge_main.vision_model,
+                bridge_main.vision_preprocess, device,
+            )
+        db.add(ClipEmbedding(
+            video_id=video_id,
+            start_ms=start_ms, end_ms=end_ms,
+            start_frame=start_frame, end_frame=end_frame,
+            num_frames=len(images),
+            embedding=clip_emb.tolist(),
+        ))
+        clip_count += 1
+
+        if clip_count % 10 == 0:
+            db.flush()
+            logger.info(f"Clip vision embeddings: {clip_count}/{len(windows)}")
+
+    db.flush()
+    t2 = _time.perf_counter()
+    logger.info(f"Stored {clip_count} clip vision embeddings in {t2-t1:.1f}s")
+
+    # Stage B: Action captions (temporal multi-frame captioning via Gemini)
+    # Skipped when CLIP_ACTION_CAPTIONING is disabled (expensive — $7/batch)
+    action_count = 0
+    if settings.CLIP_ACTION_CAPTIONING:
+        from indexing.action_captioning import caption_clip_batch
+
+        action_captions = caption_clip_batch(windows)
+        t3 = _time.perf_counter()
+        logger.info(f"Generated {len(action_captions)} action captions in {t3-t2:.1f}s")
+
+        if action_captions:
+            caption_texts = [ac[5] for ac in action_captions]
+            with bridge_main.text_lock:
+                action_embs = bridge_main.text_model.encode(
+                    caption_texts,
+                    convert_to_numpy=True,
+                    show_progress_bar=False,
+                    normalize_embeddings=True,
+                )
+            t4 = _time.perf_counter()
+            logger.info(f"Embedded {len(caption_texts)} action captions in {t4-t3:.1f}s")
+
+            for i, (win_idx, start_ms, end_ms, start_frame, end_frame, action_text) in enumerate(action_captions):
+                db.add(ActionEmbedding(
+                    video_id=video_id,
+                    start_ms=start_ms, end_ms=end_ms,
+                    start_frame=start_frame, end_frame=end_frame,
+                    num_frames=settings.CLIP_WINDOW_FRAMES,
+                    action_text=action_text,
+                    embedding=action_embs[i].tolist(),
+                ))
+                action_count += 1
+            db.flush()
+    else:
+        logger.info("Skipping action captioning (CLIP_ACTION_CAPTIONING=false)")
+
+    total = clip_count + action_count
+    logger.info(f"Clip indexing complete: {clip_count} vision + {action_count} action = {total} total")
+    return total
+
+
+def _store_face_detections(video_id, all_frames, db):
+    """Detect faces in frames, generate embeddings, save thumbnails.
+
+    Returns the number of faces stored.
+    """
+    import time as _time
+    from indexing.face_clustering import detect_and_embed_faces, assign_faces_incremental
+
+    logger.info(f"Running face detection for {video_id} on {len(all_frames)} frames")
+    t0 = _time.perf_counter()
+
+    face_count = detect_and_embed_faces(video_id, all_frames, db)
+
+    t1 = _time.perf_counter()
+    logger.info(f"Face detection took {t1-t0:.1f}s — {face_count} faces found")
+
+    # Incremental assignment to existing clusters
+    if face_count > 0:
+        assigned = assign_faces_incremental(video_id, db)
+        t2 = _time.perf_counter()
+        logger.info(f"Incremental face assignment took {t2-t1:.1f}s — {assigned} faces assigned")
+
+    return face_count
+
+
 def _store_transcript_embeddings(video_id, local_path, db):
     """Transcribe video and embed transcript segments.
 
@@ -310,6 +547,17 @@ def fix_video_indexes(video_id: str, object_name: str, db: Session):
         has_transcript = db.query(TranscriptEmbedding).filter(
             TranscriptEmbedding.video_id == video_id
         ).count()
+        has_clips = db.query(ClipEmbedding).filter(
+            ClipEmbedding.video_id == video_id
+        ).count()
+        has_faces = db.query(FaceDetection).filter(
+            FaceDetection.video_id == video_id
+        ).count()
+
+        # Detect whether this is a photo (single image) vs a video
+        media_is_photo = is_photo(object_name)
+        if media_is_photo:
+            logger.info(f"[fix] {video_id}: detected as PHOTO — will skip transcript/clips")
 
         # Use both the actual DB count AND the job flag to decide what's needed.
         # The flag means "we already ran this stage" — even if the result was 0 rows
@@ -317,8 +565,14 @@ def fix_video_indexes(video_id: str, object_name: str, db: Session):
         need_visual = has_visual == 0 and not job.visual_indexed
         need_captions = (has_captions == 0 and not job.caption_indexed
                          and settings.CAPTION_ENABLED)
-        need_transcript = has_transcript == 0 and not job.transcript_indexed
-        need_frames = need_visual or need_captions  # frame extraction needed for both
+        # Photos have no audio track or temporal dimension
+        need_transcript = (has_transcript == 0 and not job.transcript_indexed
+                           and not media_is_photo)
+        need_clips = (has_clips == 0 and not job.clip_indexed
+                      and settings.CLIP_ENABLED and not media_is_photo)
+        need_faces = (has_faces == 0 and not job.face_indexed
+                      and settings.FACE_CLUSTERING_ENABLED)
+        need_frames = need_visual or need_captions or need_faces
 
         todo = []
         if need_visual:
@@ -327,6 +581,10 @@ def fix_video_indexes(video_id: str, object_name: str, db: Session):
             todo.append("captions")
         if need_transcript:
             todo.append("transcript")
+        if need_clips:
+            todo.append("clips")
+        if need_faces:
+            todo.append("faces")
 
         if not todo:
             logger.info(f"[fix] {video_id}: all indexes present, nothing to do")
@@ -337,6 +595,12 @@ def fix_video_indexes(video_id: str, object_name: str, db: Session):
                 job.caption_count = has_captions
             job.transcript_indexed = True
             job.segment_count = has_transcript
+            if settings.CLIP_ENABLED:
+                job.clip_indexed = True
+                job.clip_count = has_clips
+            if settings.FACE_CLUSTERING_ENABLED:
+                job.face_indexed = True
+                job.face_count = has_faces
             job.status = "completed"
             job.completed_at = datetime.utcnow()
             db.commit()
@@ -348,13 +612,17 @@ def fix_video_indexes(video_id: str, object_name: str, db: Session):
         # Download video (needed for any generation)
         local_path = download_video(object_name, str(video_id))
 
-        # Extract frames if visual or captions need them
+        # Extract frames if visual, captions, or faces need them
         all_frames = None
         if need_frames:
-            logger.info(f"[fix] Extracting frames for {video_id}")
-            all_frames = list(extract_frames(
-                local_path, settings.FRAME_INTERVAL_SEC, video_id_for_thumbs=video_id
-            ))
+            if media_is_photo:
+                logger.info(f"[fix] Loading photo frame for {video_id}")
+                all_frames = extract_photo_frame(local_path, video_id_for_thumbs=video_id)
+            else:
+                logger.info(f"[fix] Extracting video frames for {video_id}")
+                all_frames = list(extract_frames(
+                    local_path, settings.FRAME_INTERVAL_SEC, video_id_for_thumbs=video_id
+                ))
             logger.info(f"[fix] Extracted {len(all_frames)} frames")
 
         # Stage 1: Visual embeddings
@@ -389,6 +657,37 @@ def fix_video_indexes(video_id: str, object_name: str, db: Session):
         else:
             job.transcript_indexed = True
             job.segment_count = has_transcript
+
+        # Stage 4: Clip embeddings (overlapping temporal windows for motion/action)
+        if need_clips:
+            clip_count = _store_clip_embeddings(video_id, local_path, db, device)
+            job.clip_indexed = True
+            job.clip_count = clip_count
+            db.commit()
+            logger.info(f"[fix] Clips: stored {clip_count} clip embeddings")
+        elif settings.CLIP_ENABLED:
+            job.clip_indexed = True
+            job.clip_count = has_clips
+
+        # Stage 5: Face detection + embedding + incremental clustering
+        # Face failures are non-fatal — don't tank the whole job
+        if need_faces:
+            try:
+                face_count_stored = _store_face_detections(video_id, all_frames, db)
+                job.face_indexed = True
+                job.face_count = face_count_stored
+                db.commit()
+                logger.info(f"[fix] Faces: stored {face_count_stored} face detections")
+            except Exception as face_err:
+                logger.warning(f"[fix] Face detection failed for {video_id} (non-fatal): {face_err}")
+                db.rollback()
+                # Re-fetch job after rollback
+                job = db.query(VideoIndexStatus).filter(
+                    VideoIndexStatus.video_id == video_id
+                ).first()
+        elif settings.FACE_CLUSTERING_ENABLED:
+            job.face_indexed = True
+            job.face_count = has_faces
 
         job.status = "completed"
         job.completed_at = datetime.utcnow()

@@ -283,3 +283,128 @@ Integrates VideoIndexer's AI models into Open Testimony, making uploaded videos 
 - **Persistent storage** — selected server URL saved to FlutterSecureStorage, restored on app startup
 - **Extensible** — new regional servers added by appending to `serverPresets` list in `upload_service.dart`
 - **No-typo design** — preset dropdown prevents accidental URL mistakes; custom entry only shown when explicitly chosen
+
+---
+
+## Tag Management & Bulk Operations (v3.1)
+
+### Tagging System
+- **Persistent tags** (`tags` table) — shared vocabulary of tags managed via API
+- `POST /tags` — staff/admin create new tags
+- `GET /tags` — list all tags; `GET /tags/counts` — tag frequency counts
+- `DELETE /tags` — admin delete unused tags
+- `GET /categories/counts` — category frequency counts
+
+### Web UI — Quick Tag Menu
+- **QuickTagMenu** component — popover for fast tag assignment on one or multiple videos
+- **Bulk select mode** — select multiple videos in list or AI search results, then "Tag Selected" to apply tags/category in batch
+- **Category chips** — quick-set category (interview, incident, documentation, other)
+- **Tag toggles** — check/uncheck existing tags; inline create new tags
+
+### Database Migration (`006_add_tags_table.sql`)
+- `tags` table: name (primary key), created_at
+
+---
+
+## SigLIP2 Vision Model & Smart Indexing (v3.1)
+
+### Vision Model Upgrade
+- **HuggingFace SigLIP2** (`hf_siglip`) — new default vision model family: `google/siglip2-so400m-patch16-naflex` with native aspect ratio (NAFlex), 1152-dim embeddings
+- **Three model families** — `hf_siglip`, `open_clip`, `pe_core` selectable via `VISION_MODEL_FAMILY` env var
+- **Concurrent search during indexing** — model locks allow search requests to proceed while indexing is in progress
+
+### Smart Index Fixer
+- Automatic detection and repair of corrupted or incomplete indexing jobs on bridge startup
+
+### Database Migration (`007_upgrade_frame_embedding_dim.sql`)
+- Widens `frame_embeddings.embedding` column to support larger model dimensions
+
+---
+
+## Frame Captioning & Caption Search (v3.1)
+
+### Captioning Pipeline (`bridge/indexing/captioning.py`)
+- **Gemini API provider** — sends individual frames to Gemini (default: `gemini-3-flash-preview`) for detailed natural-language descriptions
+- **Local provider** — alternative Qwen3-VL for offline/air-gapped deployments
+- **Configurable prompt** — caption prompt focuses on people, actions, objects, and physical interactions
+- **Batched inference** — configurable batch size and max tokens per caption
+
+### Caption Search
+- `GET /search/caption?q=...` — semantic search on caption embeddings (Qwen3-Embedding-8B encoded)
+- `GET /search/caption/exact?q=...` — case-insensitive keyword search on caption text
+- **Caption embeddings table** — video_id, frame_num, timestamp_ms, caption_text, embedding (4096-dim)
+
+---
+
+## Video Clip Understanding (v3.2)
+
+Temporal analysis for detecting actions and motion that span multiple frames.
+
+### Clip Indexing (`bridge/indexing/pipeline.py`)
+- **Overlapping temporal windows** — 16 frames @ 4fps with 8-frame stride (50% overlap), configurable via `CLIP_WINDOW_FRAMES`, `CLIP_WINDOW_STRIDE`, `CLIP_FPS`
+- **Mean-pooled clip embeddings** — vision model encodes each frame in window; mean of frame embeddings becomes clip embedding
+- **Clip embeddings table** — video_id, start_ms, end_ms, start_frame, end_frame, num_frames, embedding (vision_dim)
+
+### Action Captioning (`bridge/indexing/action_captioning.py`)
+- **Multi-frame Gemini analysis** — sampled frames from each clip window sent to Gemini with action-focused prompt
+- **Action descriptions** — "person pushing another person", "aggressive gesture", "chokehold"
+- **Action embeddings table** — same structure as clip + action_text field, text encoded with Qwen3-Embedding-8B
+- **Optional** — controlled by `CLIP_ACTION_CAPTIONING` env var (disabled by default to save API cost)
+
+### Clip & Action Search
+- `GET /search/clip/visual?q=...` — visual similarity search on mean-pooled clip embeddings
+- `GET /search/action?q=...` — semantic search on action description embeddings
+- `GET /search/action/exact?q=...` — keyword search on action_text (e.g. "chokehold", "use of force")
+
+### Database Migration (`008_add_clip_embeddings.sql`)
+- `clip_embeddings` table with HNSW index (cosine_ops)
+- `action_embeddings` table with HNSW index + GIN trigram index on action_text
+
+---
+
+## Queue Management UI (v3.2)
+
+### Web UI — Queue Panel (`QueuePanel.js`)
+- **Review queue** — staff/admin triage uploaded videos by status: pending, reviewed, flagged
+- **Queue stats** — `GET /queue/stats` returns counts per status; displayed as summary badges
+- **Per-video review** — inline video player, annotation editor (category, location, notes), audit log viewer
+- **Review actions** — Mark Reviewed, Flag, Mark Pending buttons
+- **Keyboard shortcuts** — arrow keys to navigate between videos, number keys to set review status
+- **Auto-advance** — after marking a video, automatically moves to next pending video
+- **Address autocomplete** — geocoding widget in location field, restricted by `GEOCODE_COUNTRY_CODES`
+
+### API Endpoints
+- `GET /queue` — list videos by review_status with pagination
+- `GET /queue/stats` — count of pending/reviewed/flagged videos
+- `PUT /videos/{id}/review` — update review_status (staff/admin only)
+- `GET /geocode/search` — address autocomplete proxy (country-filtered)
+
+---
+
+## Access Logging & IP Tracking (v3.2)
+
+### Request Logging
+- **Access log** — every HTTP request logged to `/app/logs/access.jsonl`
+- **Fields**: timestamp, client IP, method, path, query parameters, status code, duration (ms), user agent
+- **Volume-mounted** — `api_logs` Docker volume persists logs across restarts
+
+### Analysis Script (`scripts/scan-access-log.py`)
+- Scans access logs for non-LAN IP addresses
+- Identifies external access attempts
+- Useful for security monitoring
+
+---
+
+## Search UX Improvements (v3.2)
+
+### Search Term Highlighting
+- **Highlighted matches** — search terms highlighted in yellow in transcript and caption result text
+- **Bolded matches** — matching portions visually emphasized in result cards
+
+### Result Grouping
+- **Group by video** — search results grouped by video_id with best thumbnail, match count badge, score bar
+- **Expandable groups** — click group header to see individual matches with timestamps
+- **Click-to-seek** — clicking a match opens inline player and jumps to matched timestamp
+
+### Visual Mode Default
+- AI Search defaults to Visual (Text) mode for immediate text-based searching

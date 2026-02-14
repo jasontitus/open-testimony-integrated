@@ -9,7 +9,7 @@ A high-integrity, cross-platform mobile application and self-hosted backend for 
 - **Mobile App**: Flutter app for iOS (15.0+) and Android (API 23+)
 - **Web UI**: React dashboard for browsing, tagging, and managing testimony
 - **Backend API**: FastAPI server with cryptographic verification
-- **AI Search Bridge**: FastAPI service for AI-powered video search (OpenCLIP visual search, Whisper transcript search)
+- **AI Search Bridge**: FastAPI service for AI-powered video search (SigLIP2/OpenCLIP/PE-Core visual search, Whisper transcript search, Gemini frame captioning, temporal clip analysis)
 - **Object Storage**: MinIO (S3-compatible) for video files
 - **Database**: PostgreSQL with pgvector for metadata, device registry, and vector embeddings
 - **Reverse Proxy**: Nginx for TLS termination and routing
@@ -116,13 +116,7 @@ flutter pub get
 
 #### Step 2: Configure Server URL
 
-Edit `lib/services/upload_service.dart` and update the `baseUrl`:
-
-```dart
-static const String baseUrl = 'http://YOUR_SERVER_IP/api';
-```
-
-Replace `YOUR_SERVER_IP` with your server's IP address or domain.
+The app includes a **server selector dropdown** in Settings. Pick a preset server or select "Other..." to enter a custom URL (e.g., `http://192.168.1.100:18080/api`). No need to edit source code to switch servers.
 
 #### Step 3: Run on Device
 
@@ -191,14 +185,26 @@ flutter run
 - **Bulk Tagging**: Toggle "Select" mode to check multiple videos, then "Tag Selected" to apply tags to all at once
 
 ### AI Search
-- **Visual Search (Text)**: Describe what you're looking for and find matching video frames using OpenCLIP embeddings
+- **Visual Search (Text)**: Describe what you're looking for and find matching video frames using vision model embeddings
 - **Visual Search (Image)**: Upload a reference image to find visually similar frames
 - **Transcript Search (Semantic)**: Search by meaning across all transcribed audio
 - **Transcript Search (Exact)**: Find exact word matches in transcripts
+- **Caption Search (Semantic)**: Search AI-generated frame descriptions by meaning
+- **Caption Search (Exact)**: Keyword search on frame description text
+- **Clip Search (Visual)**: Search temporal video windows by visual similarity
+- **Action Search**: Search for specific actions/motions across time ("use of force", "chokehold")
 - **Grouped Results**: Results are clustered by video — each group shows the best thumbnail, match count badge, score, category, and tags. Click the chevron to expand individual time-stamped matches
+- **Search Term Highlighting**: Matching terms highlighted in result text
 - **Video-Level Annotation**: Click a group header to open the inline player with a full annotation panel (category, tags, notes, location) — annotate the whole video without picking a specific time slice
 - **Inline Playback**: Expand a group and click an individual match to jump to its exact timestamp
 - **Bulk Selection**: Toggle "Select" mode to check entire video groups, then tag them all at once via the sticky bottom bar
+
+### Queue Management
+- **Review Queue**: Staff/admin triage uploaded videos with status filters (pending/reviewed/flagged)
+- **Inline Review**: Video player, annotation editor, and audit log viewer in one panel
+- **Keyboard Shortcuts**: Arrow keys to navigate, number keys to set review status
+- **Auto-advance**: Moves to next pending video after marking one as reviewed
+- **Queue Stats**: Counts by review status displayed as summary badges
 
 ### Quick Annotate System
 A fast, click-based annotation workflow available in AI Search, List View, and the inline player:
@@ -286,9 +292,21 @@ CREATE TABLE videos (
     longitude FLOAT NOT NULL,
     incident_tags TEXT[],
     source VARCHAR(50),
+    media_type VARCHAR(20) DEFAULT 'video',
+    exif_metadata JSON,
     verification_status VARCHAR(20) NOT NULL,
     metadata_json JSON NOT NULL,
-    uploaded_at TIMESTAMP NOT NULL
+    uploaded_at TIMESTAMP NOT NULL,
+    category VARCHAR(50),
+    location_description TEXT,
+    notes TEXT,
+    annotations_updated_at TIMESTAMP,
+    annotations_updated_by VARCHAR(255),
+    review_status VARCHAR(20) DEFAULT 'pending',
+    reviewed_at TIMESTAMP,
+    reviewed_by INTEGER,
+    deleted_at TIMESTAMP,
+    deleted_by INTEGER
 );
 ```
 
@@ -357,31 +375,37 @@ uvicorn main:app --reload
 
 ### Running Tests
 
-The project has four test suites:
+The project includes 133 automated tests across the API server (67) and bridge service (66). A single script runs them all:
 
-**API Server Unit Tests** (run inside Docker — needs database):
 ```bash
-docker compose exec api pip install pytest "httpx<0.28"
-docker compose exec api python -m pytest tests/ -v
+# Prerequisites: Postgres must be running
+docker compose up -d db
+
+# Run all tests (~15 seconds)
+bash scripts/run-tests.sh
+
+# Run only one suite
+bash scripts/run-tests.sh api       # API server tests only
+bash scripts/run-tests.sh bridge    # Bridge service tests only
+
+# Pass extra pytest args (e.g. run a single test file or use -k filter)
+bash scripts/run-tests.sh api -k "test_queue"
+bash scripts/run-tests.sh bridge -k "test_search"
 ```
 
-**Bridge Service Unit Tests** (run inside Docker — needs database + pgvector):
+The script uses the local Postgres instance at `localhost:5432` by default. Override with:
 ```bash
-docker compose exec bridge pip install pytest "httpx<0.28"
-docker compose exec bridge python -m pytest tests/ -v
+TEST_DATABASE_URL="postgresql://user:pass@localhost:5432/mydb" bash scripts/run-tests.sh
 ```
 
-**Integration Tests** (run on host — hits the live API at localhost:18080):
+**Bridge tests** require the bridge virtualenv (`bridge/.venv`). Set it up once:
 ```bash
-pip install pytest requests
-python -m pytest tests/ -v
+cd bridge && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
 ```
 
-**Frontend Component Tests** (run on host):
+**Frontend component tests** (run separately):
 ```bash
-cd web-ui
-npm install
-npx react-scripts test --watchAll=false --verbose
+cd web-ui && npm install && npx react-scripts test --watchAll=false --verbose
 ```
 
 ### Mobile Development
@@ -481,6 +505,13 @@ docker-compose exec -T db psql -U user opentestimony < backup_20240101.sql
 - [x] Quick Annotate workflow for fast tagging from search results and list view
 - [x] Bulk tagging for multiple videos at once
 - [x] Grouped search results by video with inline annotation panel
+- [x] AI frame captioning (Gemini + local) and caption search
+- [x] Temporal clip understanding with overlapping windows
+- [x] Action detection and action search
+- [x] Queue management UI for reviewing/triaging uploads
+- [x] Access logging with IP tracking
+- [x] SigLIP2 vision model support (native aspect ratio)
+- [x] Address autocomplete / geocoding
 - [ ] Implement Restic automated backups
 - [ ] Add video playback in mobile app
 - [ ] Add video sharing functionality

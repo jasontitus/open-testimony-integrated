@@ -21,11 +21,11 @@ from sqlalchemy.orm import sessionmaker
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import settings
-from models import Base, CaptionEmbedding, FrameEmbedding, TranscriptEmbedding, VideoIndexStatus
+from models import Base, CaptionEmbedding, FrameEmbedding, SearchQuery, TranscriptEmbedding, VideoIndexStatus
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "postgresql://user:pass@db:5432/opentestimony_test",
+    "postgresql://user:pass@localhost:5432/opentestimony_test",
 )
 
 
@@ -39,7 +39,15 @@ def db_engine():
     engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        # Create the OT API's videos table (bridge FK target) if missing
+        conn.commit()
+
+    # Drop and recreate all bridge tables so schema always matches current
+    # models (e.g. embedding dimensions). The videos table is owned by the
+    # API but we need it as an FK target, so drop bridge tables first to
+    # avoid FK issues, then recreate everything.
+    Base.metadata.drop_all(bind=engine)
+    with engine.connect() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS videos CASCADE"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS videos (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -68,7 +76,6 @@ def db_engine():
         conn.commit()
     Base.metadata.create_all(bind=engine)
     yield engine
-    Base.metadata.drop_all(bind=engine)
     engine.dispose()
 
 
@@ -82,6 +89,7 @@ def clean_tables(db_engine):
     """Truncate bridge tables between tests."""
     yield
     with db_engine.connect() as conn:
+        conn.execute(text("DELETE FROM search_queries"))
         conn.execute(text("DELETE FROM caption_embeddings"))
         conn.execute(text("DELETE FROM frame_embeddings"))
         conn.execute(text("DELETE FROM transcript_embeddings"))

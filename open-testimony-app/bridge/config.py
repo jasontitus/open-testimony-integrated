@@ -59,6 +59,29 @@ class Settings:
     # Whisper model
     WHISPER_MODEL: str = os.environ.get("WHISPER_MODEL", "large-v3")
 
+    # Video clip understanding (overlapping temporal windows)
+    # Enable clip-level indexing for action/motion detection
+    CLIP_ENABLED: bool = os.environ.get("CLIP_ENABLED", "true").lower() == "true"
+    # Number of frames per clip window
+    CLIP_WINDOW_FRAMES: int = int(os.environ.get("CLIP_WINDOW_FRAMES", "16"))
+    # How many frames to slide forward between windows (overlap = window - stride)
+    CLIP_WINDOW_STRIDE: int = int(os.environ.get("CLIP_WINDOW_STRIDE", "8"))
+    # FPS for clip frame extraction (higher than FRAME_INTERVAL_SEC for temporal detail)
+    CLIP_FPS: float = float(os.environ.get("CLIP_FPS", "4.0"))
+    # Whether to run Gemini action captioning on clip windows (expensive — disable to save cost)
+    CLIP_ACTION_CAPTIONING: bool = os.environ.get("CLIP_ACTION_CAPTIONING", "true").lower() == "true"
+    # Prompt for temporal action captioning (sent with multi-frame sequences to Gemini)
+    CLIP_ACTION_PROMPT: str = os.environ.get(
+        "CLIP_ACTION_PROMPT",
+        "These images are consecutive frames from a video clip spanning a few seconds. "
+        "Describe the physical ACTIONS and MOTION happening across these frames. "
+        "Focus specifically on: body movements, physical interactions between people "
+        "(pushing, grabbing, striking, restraining, choking), use of force, "
+        "aggressive gestures, people falling or being thrown, and any rapid changes in posture. "
+        "If no significant action is visible, say 'no significant action'. "
+        "Be specific about who is doing what to whom.",
+    )
+
     # Processing
     DEVICE: str = os.environ.get("DEVICE", "cpu")
     USE_FP16: bool = os.environ.get("USE_FP16", "false").lower() == "true"
@@ -66,6 +89,24 @@ class Settings:
     BATCH_SIZE: int = int(os.environ.get("BATCH_SIZE", "16"))
     TEMP_DIR: str = os.environ.get("TEMP_DIR", "/data/temp")
     THUMBNAIL_DIR: str = os.environ.get("THUMBNAIL_DIR", "/data/thumbnails")
+
+    # Face clustering (InsightFace buffalo_l + HDBSCAN)
+    FACE_CLUSTERING_ENABLED: bool = os.environ.get("FACE_CLUSTERING_ENABLED", "false").lower() == "true"
+    # InsightFace model pack: "buffalo_l" (ArcFace ResNet-100, 320MB, best accuracy)
+    # or "buffalo_sc" (MobileFaceNet, 12MB, faster but less accurate)
+    FACE_MODEL_NAME: str = os.environ.get("FACE_MODEL_NAME", "buffalo_l")
+    # Face embedding dimension (512 for both buffalo_l and buffalo_sc)
+    FACE_EMBEDDING_DIM: int = int(os.environ.get("FACE_EMBEDDING_DIM", "512"))
+    # Detection confidence threshold (lower = more faces detected, more false positives)
+    FACE_DETECTION_THRESHOLD: float = float(os.environ.get("FACE_DETECTION_THRESHOLD", "0.5"))
+    # Minimum face size in pixels (width or height) — skip tiny faces
+    FACE_MIN_SIZE: int = int(os.environ.get("FACE_MIN_SIZE", "30"))
+    # HDBSCAN min_cluster_size: minimum faces to form a person cluster
+    FACE_CLUSTER_MIN_SIZE: int = int(os.environ.get("FACE_CLUSTER_MIN_SIZE", "3"))
+    # Cosine distance threshold for incremental assignment to existing clusters
+    FACE_SIMILARITY_THRESHOLD: float = float(os.environ.get("FACE_SIMILARITY_THRESHOLD", "0.4"))
+    # Directory for cropped face thumbnails
+    FACE_THUMBNAIL_DIR: str = os.environ.get("FACE_THUMBNAIL_DIR", "/data/face_thumbnails")
 
     # Worker
     WORKER_POLL_INTERVAL: int = int(os.environ.get("WORKER_POLL_INTERVAL", "10"))

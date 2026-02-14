@@ -15,13 +15,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Install PE-Core (perception_models) from source for vision encoding
-# NOTE: Disabled — decord==0.6.0 (transitive dep) does not build on macOS/ARM.
-#       Default config uses OpenCLIP (VISION_MODEL_FAMILY=open_clip) so this is not needed.
-#       Uncomment when building on Linux x86_64 or when decord supports aarch64.
-# RUN apt-get update && apt-get install -y --no-install-recommends git \
-#     && git clone --depth 1 https://github.com/facebookresearch/perception_models.git /opt/perception_models \
-#     && pip install --no-cache-dir -e /opt/perception_models \
-#     && apt-get purge -y git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+# NOTE: decord==0.6.0 (transitive dep) may not build on macOS/ARM.
+#       This works on Linux x86_64 Docker builds.
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && git clone --depth 1 https://github.com/facebookresearch/perception_models.git /opt/perception_models \
+    && pip install --no-cache-dir -e /opt/perception_models \
+    && apt-get purge -y git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 8003
 

@@ -8,12 +8,14 @@ import json
 import logging
 import os
 import tempfile
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 from io import BytesIO
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Response
+from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException, Depends, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from cryptography.hazmat.primitives import hashes, serialization
@@ -42,8 +44,113 @@ _default_tags: list[str] = []
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --- Access log: records every request with client IP ---
+ACCESS_LOG_DIR = os.environ.get("ACCESS_LOG_DIR", "/app/logs")
+ACCESS_LOG_FILE = os.path.join(ACCESS_LOG_DIR, "access.jsonl")
+try:
+    os.makedirs(ACCESS_LOG_DIR, exist_ok=True)
+except OSError:
+    # Running outside Docker (e.g. tests) where /app doesn't exist —
+    # fall back to a temp directory so the module can still be imported.
+    ACCESS_LOG_DIR = os.path.join(tempfile.gettempdir(), "ot-access-logs")
+    ACCESS_LOG_FILE = os.path.join(ACCESS_LOG_DIR, "access.jsonl")
+    os.makedirs(ACCESS_LOG_DIR, exist_ok=True)
+
+# Dedicated logger that writes JSON lines to the access log file
+_access_logger = logging.getLogger("access_log")
+_access_logger.setLevel(logging.INFO)
+_access_logger.propagate = False
+_access_handler = logging.FileHandler(ACCESS_LOG_FILE)
+_access_handler.setFormatter(logging.Formatter("%(message)s"))
+_access_logger.addHandler(_access_handler)
+
+
+def _get_client_ip(request: Request) -> str:
+    """Extract the real client IP, respecting proxy headers set by nginx."""
+    # X-Real-IP is set by our nginx config
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+    # Fallback to first entry in X-Forwarded-For
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    # Direct connection (no proxy)
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+class AccessLogMiddleware(BaseHTTPMiddleware):
+    """Logs every request to a JSONL file with client IP, path, query, and timing."""
+
+    async def dispatch(self, request: Request, call_next):
+        start = time.time()
+        client_ip = _get_client_ip(request)
+
+        response = await call_next(request)
+
+        duration_ms = round((time.time() - start) * 1000, 1)
+
+        entry = {
+            "ts": datetime.utcnow().isoformat() + "Z",
+            "ip": client_ip,
+            "method": request.method,
+            "path": request.url.path,
+            "query": str(request.url.query) if request.url.query else None,
+            "status": response.status_code,
+            "duration_ms": duration_ms,
+            "user_agent": request.headers.get("user-agent"),
+        }
+        _access_logger.info(json.dumps(entry, separators=(",", ":")))
+
+        return response
+
+
 # Create database tables
 Base.metadata.create_all(bind=engine)
+
+
+def _sync_schema():
+    """Ensure DB columns match model definitions (adds missing columns,
+    fixes nullability). Runs once at import time so the schema is always
+    current without needing a separate migration tool."""
+    from sqlalchemy import inspect as sa_inspect, text as sa_text
+
+    inspector = sa_inspect(engine)
+    with engine.begin() as conn:
+        for table_name, table in Base.metadata.tables.items():
+            if not inspector.has_table(table_name):
+                continue
+            db_columns = {c["name"]: c for c in inspector.get_columns(table_name)}
+            for col in table.columns:
+                if col.name not in db_columns:
+                    # Add missing column
+                    col_type = col.type.compile(engine.dialect)
+                    nullable = "" if col.nullable else " NOT NULL"
+                    default = ""
+                    if col.default is not None and col.default.arg is not None:
+                        default = f" DEFAULT '{col.default.arg}'"
+                    logger.info(f"Schema sync: adding {table_name}.{col.name} ({col_type})")
+                    conn.execute(sa_text(
+                        f'ALTER TABLE {table_name} ADD COLUMN "{col.name}" {col_type}{nullable}{default}'
+                    ))
+                else:
+                    # Fix nullability mismatch
+                    db_col = db_columns[col.name]
+                    if col.nullable and not db_col["nullable"]:
+                        logger.info(f"Schema sync: making {table_name}.{col.name} nullable")
+                        conn.execute(sa_text(
+                            f'ALTER TABLE {table_name} ALTER COLUMN "{col.name}" DROP NOT NULL'
+                        ))
+                    elif not col.nullable and db_col["nullable"] and col.name != "id":
+                        logger.info(f"Schema sync: making {table_name}.{col.name} NOT NULL")
+                        conn.execute(sa_text(
+                            f'ALTER TABLE {table_name} ALTER COLUMN "{col.name}" SET NOT NULL'
+                        ))
+
+
+_sync_schema()
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -60,6 +167,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Access logging middleware — logs every request with client IP to access.jsonl
+app.add_middleware(AccessLogMiddleware)
 
 
 @app.on_event("startup")
@@ -446,23 +556,48 @@ async def upload_video(
                 length=file_size,
                 content_type=content_type,
             )
+
+            # Step 6a: Extract EXIF from photos (server-side)
+            exif = None
+            if media_type == "photo":
+                tmp.seek(0)
+                exif = _extract_exif(tmp.read())
         finally:
             tmp.close()
 
         logger.info(f"Media uploaded to MinIO: {object_name}")
 
         # Step 7: Store metadata in PostgreSQL
+        # For photos, prefer EXIF time/location when the device payload
+        # doesn't carry real values (the EXIF data is unverified but present).
+        record_timestamp = datetime.fromisoformat(payload["timestamp"].replace("Z", "+00:00"))
+        record_lat = payload["location"]["lat"]
+        record_lon = payload["location"]["lon"]
+        exif_metadata = payload.get("exif_metadata")
+
+        if exif and media_type == "photo":
+            exif_metadata = exif["raw"]
+            if exif["datetime"]:
+                try:
+                    record_timestamp = datetime.strptime(exif["datetime"], "%Y:%m:%d %H:%M:%S")
+                except ValueError:
+                    pass
+            if exif["lat"] is not None:
+                record_lat = exif["lat"]
+            if exif["lon"] is not None:
+                record_lon = exif["lon"]
+
         video_record = Video(
             device_id=device_id,
             object_name=object_name,
             file_hash=calculated_hash,
-            timestamp=datetime.fromisoformat(payload["timestamp"].replace("Z", "+00:00")),
-            latitude=payload["location"]["lat"],
-            longitude=payload["location"]["lon"],
+            timestamp=record_timestamp,
+            latitude=record_lat,
+            longitude=record_lon,
             incident_tags=payload.get("incident_tags", []),
             source=source,
             media_type=media_type,
-            exif_metadata=payload.get("exif_metadata"),
+            exif_metadata=exif_metadata,
             verification_status=verification_status,
             metadata_json=metadata_dict,
             uploaded_at=datetime.utcnow()
@@ -488,19 +623,18 @@ async def upload_video(
         logger.info(f"Video record created with ID: {video_record.id}")
 
         # Step 9: Notify bridge service for AI indexing (fire-and-forget)
-        if media_type == "video":
-            try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    await client.post(
-                        f"{os.environ.get('BRIDGE_URL', 'http://bridge:8003')}/hooks/video-uploaded",
-                        json={
-                            "video_id": str(video_record.id),
-                            "object_name": object_name,
-                        },
-                    )
-                logger.info(f"Bridge notified for video {video_record.id}")
-            except Exception as e:
-                logger.warning(f"Bridge notification failed (non-fatal): {e}")
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(
+                    f"{os.environ.get('BRIDGE_URL', 'http://bridge:8003')}/hooks/video-uploaded",
+                    json={
+                        "video_id": str(video_record.id),
+                        "object_name": object_name,
+                    },
+                )
+            logger.info(f"Bridge notified for {media_type} {video_record.id}")
+        except Exception as e:
+            logger.warning(f"Bridge notification failed (non-fatal): {e}")
 
         return {
             "status": "success",

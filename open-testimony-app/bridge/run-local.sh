@@ -52,10 +52,9 @@ export MINIO_BUCKET="opentestimony-videos"
 export JWT_SECRET_KEY="change-me-in-production-use-a-real-secret"
 
 # Model configuration
-export VISION_MODEL_FAMILY="hf_siglip"
-export VISION_MODEL_NAME="google/siglip2-so400m-patch16-naflex"
-export VISION_MODEL_PRETRAINED="webli"
-export VISION_EMBEDDING_DIM="1152"
+export VISION_MODEL_FAMILY="pe_core"
+export VISION_MODEL_NAME="PE-Core-L14-336"
+export VISION_EMBEDDING_DIM="1024"
 export TRANSCRIPT_MODEL_NAME="Qwen/Qwen3-Embedding-8B"
 export TRANSCRIPT_EMBEDDING_DIM="4096"
 export WHISPER_MODEL="large-v3"
@@ -68,6 +67,15 @@ export CAPTION_MODEL_NAME="gemini-3-flash-preview"  # or "gemini-2.0-flash" or "
 export CAPTION_ENABLED="true"
 export CAPTION_MAX_TOKENS="256"
 export CAPTION_BATCH_SIZE="1"
+export CLIP_ACTION_CAPTIONING="false"
+
+# Face clustering (InsightFace buffalo_l + HDBSCAN)
+export FACE_CLUSTERING_ENABLED="true"
+export FACE_MODEL_NAME="buffalo_l"
+export FACE_DETECTION_THRESHOLD="0.65"
+export FACE_MIN_SIZE="50"
+export FACE_CLUSTER_MIN_SIZE="3"
+export FACE_SIMILARITY_THRESHOLD="0.3"
 
 # MPS GPU acceleration on Apple Silicon
 export DEVICE="mps"
@@ -79,6 +87,7 @@ export BATCH_SIZE="16"
 export WORKER_POLL_INTERVAL="10"
 export TEMP_DIR="$DATA_DIR/temp"
 export THUMBNAIL_DIR="$DATA_DIR/thumbnails"
+export FACE_THUMBNAIL_DIR="$DATA_DIR/face_thumbnails"
 export OT_API_URL="http://localhost:18080/api"
 
 echo ""
